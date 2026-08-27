@@ -12,16 +12,29 @@ import { describe, expect, it, vi } from "vitest";
 import { mkEvent, mkStubRoom, mockStateEventImplementation } from "test-utils";
 
 import {
+    createRoomImagePack,
     decorateCustomEmotes,
+    deleteRoomImagePack,
+    disableGlobalPack,
+    enableGlobalPack,
     getCustomEmotesForRoom,
     getImagePacksForRoom,
+    getRoomImagePackOrder,
     IMAGE_PACK_EVENT_TYPE,
     IMAGE_PACK_ROOMS_EVENT_TYPE,
     LEGACY_IMAGE_PACK_EVENT_TYPE,
     LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
     LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
     prepareCustomEmotesForEditing,
+    redactRoomImagePack,
+    removeRoomPackEmote,
+    removeUserPackEmote,
     resolveCustomEmoteToken,
+    reorderRoomImagePacks,
+    updateRoomImagePackMetadata,
+    upsertRoomPackEmote,
+    upsertUserImagePack,
+    upsertUserPackEmote,
     type CustomEmote,
     type ResolvedImagePack,
 } from "./custom-emotes";
@@ -243,5 +256,278 @@ describe("custom emotes", () => {
                 sendToken: ":wave/edited-1:",
             },
         ]);
+    });
+});
+
+describe("image pack writer helpers", () => {
+    function clientWithRoom(room: Room, initialAccountData: Record<string, Record<string, unknown>> = {}): MatrixClient {
+        const accountData: Record<string, Record<string, unknown>> = { ...initialAccountData };
+        const stateEventsByKey: Record<string, Record<string, MatrixEvent>> = {};
+        const stateLists: Record<string, MatrixEvent[]> = {};
+        const setStateEvent = (
+            roomId: string,
+            type: string,
+            content: unknown,
+            stateKey: string,
+        ): unknown => {
+            const list = (stateLists[type] = stateLists[type] ?? []);
+            const event = mkEvent({
+                event: true,
+                type,
+                room: roomId,
+                user: USER_ID,
+                skey: stateKey,
+                content: content as Record<string, unknown>,
+            });
+            const slot = (stateEventsByKey[type] = stateEventsByKey[type] ?? {});
+            slot[stateKey] = event;
+            const idx = list.findIndex((e) => e.getStateKey() === stateKey);
+            if (idx >= 0) list[idx] = event;
+            else list.push(event);
+            vi.mocked(room.currentState.getStateEvents).mockImplementation(mockStateEventImplementation(list));
+            return { event_id: `$${type}:${stateKey}` };
+        };
+        const client: MatrixClient = {
+            getUserId: vi.fn(() => USER_ID),
+            getRoom: vi.fn(() => room),
+            getAccountData: vi.fn((type: string) => ({
+                getContent: () => accountData[type] ?? {},
+            })),
+            sendStateEvent: vi.fn(setStateEvent),
+            setAccountData: vi.fn(async (type: string, content: unknown) => {
+                accountData[type] = content as Record<string, unknown>;
+                return {};
+            }),
+            redactEvent: vi.fn(async (roomId: string, eventId: string) => {
+                const match = /^(\$[^:]+):(.+)$/.exec(eventId);
+                if (!match) return { event_id: "$redaction" };
+                const [, type, stateKey] = match;
+                const list = stateLists[type];
+                if (list) {
+                    const idx = list.findIndex((e) => e.getStateKey() === stateKey);
+                    if (idx >= 0) list.splice(idx, 1);
+                }
+                const slot = stateEventsByKey[type];
+                if (slot) delete slot[stateKey];
+                vi.mocked(room.currentState.getStateEvents).mockImplementation(
+                    mockStateEventImplementation(stateLists[type] ?? []),
+                );
+                void roomId;
+                return { event_id: "$redaction" };
+            }),
+        } as unknown as MatrixClient;
+        return client;
+    }
+
+    it("creates a new room pack with emoticon usage", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room);
+        await createRoomImagePack(client, room.roomId, "k", {
+            displayName: "P",
+            images: { wave: { shortcode: "wave", url: "mxc://e/wave" } },
+        });
+        expect(client.sendStateEvent).toHaveBeenCalledWith(
+            room.roomId,
+            IMAGE_PACK_EVENT_TYPE,
+            {
+                images: { wave: { url: "mxc://e/wave" } },
+                pack: { display_name: "P", usage: ["emoticon"] },
+            },
+            "k",
+        );
+    });
+
+    it("upserts an emote into an existing pack without dropping other emotes", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        setStateEvents(room, [
+            packEvent(room.roomId, "k", {
+                pack: { display_name: "P", usage: ["emoticon"] },
+                images: { wave: { url: "mxc://e/wave" } },
+            }),
+        ]);
+        const client = clientWithRoom(room);
+        await upsertRoomPackEmote(client, room.roomId, "k", { shortcode: "yes", url: "mxc://e/yes" });
+        expect(client.sendStateEvent).toHaveBeenCalledWith(
+            room.roomId,
+            IMAGE_PACK_EVENT_TYPE,
+            {
+                pack: { display_name: "P", usage: ["emoticon"] },
+                images: {
+                    wave: { url: "mxc://e/wave" },
+                    yes: { url: "mxc://e/yes" },
+                },
+            },
+            "k",
+        );
+    });
+
+    it("removes an emote from a pack", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        setStateEvents(room, [
+            packEvent(room.roomId, "k", {
+                pack: { display_name: "P", usage: ["emoticon"] },
+                images: {
+                    wave: { url: "mxc://e/wave" },
+                    yes: { url: "mxc://e/yes" },
+                },
+            }),
+        ]);
+        const client = clientWithRoom(room);
+        await removeRoomPackEmote(client, room.roomId, "k", "wave");
+        expect(client.sendStateEvent).toHaveBeenCalledWith(
+            room.roomId,
+            IMAGE_PACK_EVENT_TYPE,
+            {
+                pack: { display_name: "P", usage: ["emoticon"] },
+                images: { yes: { url: "mxc://e/yes" } },
+            },
+            "k",
+        );
+    });
+
+    it("updates only metadata when renames happen", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        setStateEvents(room, [
+            packEvent(room.roomId, "k", {
+                pack: { display_name: "Old", usage: ["emoticon"] },
+                images: { wave: { url: "mxc://e/wave" } },
+            }),
+        ]);
+        const client = clientWithRoom(room);
+        await updateRoomImagePackMetadata(client, room.roomId, "k", { displayName: "New" });
+        expect(client.sendStateEvent).toHaveBeenCalledWith(
+            room.roomId,
+            IMAGE_PACK_EVENT_TYPE,
+            {
+                pack: { display_name: "New", usage: ["emoticon"] },
+                images: { wave: { url: "mxc://e/wave" } },
+            },
+            "k",
+        );
+    });
+
+    it("throws on update when the pack does not exist", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room);
+        await expect(
+            updateRoomImagePackMetadata(client, room.roomId, "missing", { displayName: "X" }),
+        ).rejects.toThrow(/does not exist/);
+    });
+
+    it("writes the order marker via reorderRoomImagePacks", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room);
+        await reorderRoomImagePacks(client, room.roomId, ["a", "b", "c"]);
+        expect(client.sendStateEvent).toHaveBeenCalledWith(
+            room.roomId,
+            IMAGE_PACK_EVENT_TYPE,
+            { stateKeys: ["a", "b", "c"] },
+            "_order",
+        );
+    });
+
+    it("reads back the order marker via getRoomImagePackOrder", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        setStateEvents(room, [
+            packEvent(room.roomId, "_order", { stateKeys: ["a", "b"] }),
+        ]);
+        const client = clientWithRoom(room);
+        expect(getRoomImagePackOrder(client, room.roomId)).toEqual({ stateKeys: ["a", "b"] });
+    });
+
+    it("redacts a pack by event id", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        setStateEvents(room, [
+            packEvent(room.roomId, "k", {
+                pack: { display_name: "P", usage: ["emoticon"] },
+                images: { wave: { url: "mxc://e/wave" } },
+            }),
+        ]);
+        const client = clientWithRoom(room);
+        await redactRoomImagePack(client, room.roomId, "$m.room.image_pack:k");
+        expect(client.redactEvent).toHaveBeenCalledWith(room.roomId, "$m.room.image_pack:k");
+        // The pack event should be gone from current state.
+        const events = room.currentState.getStateEvents(IMAGE_PACK_EVENT_TYPE);
+        expect(events).toEqual([]);
+    });
+
+    it("deleteRoomImagePack is a low-level helper that still writes an empty pack", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room);
+        await deleteRoomImagePack(client, room.roomId, "k");
+        expect(client.sendStateEvent).toHaveBeenCalledWith(
+            room.roomId,
+            IMAGE_PACK_EVENT_TYPE,
+            { images: {}, pack: { usage: ["emoticon"] } },
+            "k",
+        );
+    });
+
+    it("enables and disables global pack references via stable and legacy account data", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room);
+        await enableGlobalPack(client, { roomId: "!g:example.org", stateKey: "k" });
+        expect(client.setAccountData).toHaveBeenCalledWith(IMAGE_PACK_ROOMS_EVENT_TYPE, {
+            rooms: { "!g:example.org": { k: {} } },
+        });
+        expect(client.setAccountData).toHaveBeenCalledWith(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, {
+            rooms: { "!g:example.org": { k: {} } },
+        });
+        await disableGlobalPack(client, { roomId: "!g:example.org", stateKey: "k" });
+        expect(client.setAccountData).toHaveBeenLastCalledWith(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, {
+            rooms: {},
+        });
+    });
+
+    it("writes the user pack to the legacy account-data key for backwards compatibility", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room);
+        await upsertUserImagePack(client, {
+            displayName: "Mine",
+            images: { wave: { shortcode: "wave", url: "mxc://e/wave" } },
+        });
+        expect(client.setAccountData).toHaveBeenCalledWith(
+            LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
+            {
+                pack: { display_name: "Mine", usage: ["emoticon"] },
+                images: { wave: { url: "mxc://e/wave" } },
+            },
+        );
+    });
+
+    it("adds and removes emotes on the user pack", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room, {
+            [LEGACY_USER_IMAGE_PACK_EVENT_TYPE]: {
+                pack: { display_name: "Mine", usage: ["emoticon"] },
+                images: { wave: { url: "mxc://e/wave" } },
+            },
+        });
+        await upsertUserPackEmote(client, { shortcode: "yes", url: "mxc://e/yes" });
+        expect(client.setAccountData).toHaveBeenLastCalledWith(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, {
+            pack: { display_name: "Mine", usage: ["emoticon"] },
+            images: {
+                wave: { url: "mxc://e/wave" },
+                yes: { url: "mxc://e/yes" },
+            },
+        });
+        await removeUserPackEmote(client, "wave");
+        expect(client.setAccountData).toHaveBeenLastCalledWith(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, {
+            pack: { display_name: "Mine", usage: ["emoticon"] },
+            images: { yes: { url: "mxc://e/yes" } },
+        });
+    });
+
+    it("reads back the user pack as if it were a resolved pack", () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room, {
+            [LEGACY_USER_IMAGE_PACK_EVENT_TYPE]: {
+                pack: { display_name: "Mine", usage: ["emoticon"] },
+                images: { wave: { url: "mxc://e/wave" } },
+            },
+        });
+        const emotes = getCustomEmotesForRoom(client, room, () => null);
+        expect(emotes.map((emote) => emote.shortcode)).toEqual(["wave"]);
+        expect(emotes[0].pack.displayName).toBe("Mine");
     });
 });

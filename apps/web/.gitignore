@@ -6,4 +6,5 @@
 /src/component-index.js
 # Auto-generated file
 /src/modules.js
-/build_config.yaml
+/playwright/blob-report/
+

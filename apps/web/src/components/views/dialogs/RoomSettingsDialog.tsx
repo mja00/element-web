@@ -10,6 +10,9 @@ Please see LICENSE files in the repository root for full details.
 
 import React from "react";
 import { RoomEvent, type Room, RoomStateEvent, type MatrixEvent, EventType } from "matrix-js-sdk/src/matrix";
+import ImagePackIcon from "@vector-im/compound-design-tokens/assets/web/icons/image";
+import { ImagePacksSettings, useImagePacks } from "@element-hq/element-web-module-image-packs";
+import { createWritersFromClient } from "../../../custom-emotes";
 import {
     AdminIcon,
     GroupIcon,
@@ -57,6 +60,30 @@ interface IProps {
 interface IState {
     room: Room;
     activeTabId: RoomSettingsTab;
+}
+
+/**
+ * Room-scoped image packs section. The module exports the body component
+ * and the data hook; we wire the live `MatrixClient` to the `PackWriters`
+ * contract here via `createWritersFromClient` (defined in `custom-emotes.ts`).
+ */
+function ImagePacksRoomSettingsTab({ room }: { room: Room }): React.ReactElement {
+    const cli = MatrixClientPeg.safeGet();
+    const hook = useImagePacks({
+        client: {
+            getUserId: () => cli.getUserId(),
+            getRoom: (id: string) => cli.getRoom(id),
+            getAccountData: (type: string) => {
+                const ev = cli.getAccountData(type as never);
+                return ev ? { getContent: () => ev.getContent() } : null;
+            },
+            setAccountData: (type: string, content: unknown) =>
+                cli.setAccountData(type as never, content as never),
+        },
+        writers: createWritersFromClient(cli),
+        room,
+    });
+    return <ImagePacksSettings api={hook} roomId={room.roomId} />;
 }
 
 class RoomSettingsDialog extends React.Component<IProps, IState> {
@@ -207,6 +234,15 @@ class RoomSettingsDialog extends React.Component<IProps, IState> {
                 _td("right_panel|polls_button"),
                 <PollsIcon />,
                 <PollHistoryTab room={this.state.room} onFinished={() => this.props.onFinished(true)} />,
+            ),
+        );
+
+        tabs.push(
+            new Tab(
+                RoomSettingsTab.ImagePacks,
+                _td("settings|image_packs|tab_title"),
+                <ImagePackIcon />,
+                <ImagePacksRoomSettingsTab room={this.state.room} />,
             ),
         );
 

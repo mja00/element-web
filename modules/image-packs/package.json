@@ -1,0 +1,40 @@
+{
+    "name": "@element-hq/element-web-module-image-packs",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "main": "lib/index.js",
+    "types": "src/index.tsx",
+    "exports": {
+        ".": {
+            "types": "./src/index.tsx",
+            "import": "./lib/index.js"
+        }
+    },
+    "scripts": {
+        "build": "nx build",
+        "lint:types": "nx lint:types",
+        "test:unit": "nx test:unit"
+    },
+    "devDependencies": {
+        "@arcmantle/vite-plugin-import-css-sheet": "^1.0.12",
+        "@element-hq/element-web-module-api": "workspace:*",
+        "@types/node": "catalog:",
+        "@types/react": "catalog:",
+        "@vitejs/plugin-react": "catalog:",
+        "@vitest/browser-playwright": "catalog:",
+        "react": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vite-plugin-node-polyfills": "catalog:",
+        "vite-plugin-svgr": "catalog:",
+        "vitest": "catalog:"
+    },
+    "dependencies": {
+        "@vector-im/compound-design-tokens": "^10.0.0",
+        "@vector-im/compound-web": "^9.0.0",
+        "matrix-web-i18n": "^3.6.0",
+        "styled-components": "^6.3.11",
+        "zod": "^4.0.0"
+    }
+}

@@ -9,8 +9,9 @@ import escapeHtml from "escape-html";
 import { KnownMembership, type MatrixClient, type MatrixEvent, type Room } from "matrix-js-sdk/src/matrix";
 import { type RoomMessageEventContent, type RoomMessageTextEventContent } from "matrix-js-sdk/src/types";
 
-import { SDKContextClass } from "./contexts/SDKContextClass";
+import type { PackWriters } from "@element-hq/element-web-module-image-packs";
 
+import { SDKContextClass } from "./contexts/SDKContextClass";
 export const IMAGE_PACK_EVENT_TYPE = "m.room.image_pack";
 export const LEGACY_IMAGE_PACK_EVENT_TYPE = "im.ponies.room_emotes";
 export const IMAGE_PACK_ROOMS_EVENT_TYPE = "m.image_pack.rooms";
@@ -430,4 +431,457 @@ export function prepareCustomEmotesForEditing(html: string): EditableCustomEmote
     }
 
     return { html: parsed.body.innerHTML, emotes };
+}
+/*
+ * Image pack writer helpers.
+ *
+ * These helpers perform the writes that back in-Element image pack management
+ * (MSC2545). They are written to round-trip through the same event types the
+ * read helpers above already consume (`m.room.image_pack`,
+ * `m.image_pack.rooms`, and the legacy `im.ponies.*` keys for compatibility),
+ * so any newly written content shows up in the existing custom-emote
+ * autocomplete / emoji picker without a restart.
+ *
+ * Scope: writers only. Read helpers above are intentionally left untouched.
+ */
+
+export type ImagePackScope = "user" | "room" | "space";
+
+const IMAGE_PACK_USAGE_EMOTICON = "emoticon";
+
+export interface EmoteEdit {
+    shortcode: string;
+    url: string;
+    body?: string;
+    info?: Record<string, unknown>;
+}
+
+export interface ImagePackDraft {
+    displayName?: string;
+    avatarUrl?: string;
+    attribution?: string;
+    usage?: string[];
+    images?: Record<string, EmoteEdit>;
+}
+
+export interface GlobalPackReference {
+    roomId: string;
+    stateKey: string;
+}
+
+function cloneImagePackContent(content: ImagePackContent): ImagePackContent {
+    const images: Record<string, ImagePackImage> = {};
+    for (const [shortcode, image] of Object.entries(content.images)) {
+        const cloned: ImagePackImage = { url: image.url };
+        if (image.body !== undefined) cloned.body = image.body;
+        if (image.info) cloned.info = { ...image.info };
+        images[shortcode] = cloned;
+    }
+    if (!content.pack) return { images, pack: { usage: [IMAGE_PACK_USAGE_EMOTICON] } };
+    const pack: ImagePackContent["pack"] = { usage: content.pack.usage ?? [IMAGE_PACK_USAGE_EMOTICON] };
+    if (content.pack.display_name !== undefined) pack.display_name = content.pack.display_name;
+    if (content.pack.avatar_url !== undefined) pack.avatar_url = content.pack.avatar_url;
+    if (content.pack.attribution !== undefined) pack.attribution = content.pack.attribution;
+    return { images, pack };
+}
+
+function readCurrentPackEvent(
+    client: MatrixClient,
+    roomId: string,
+    stateKey: string,
+    type: typeof IMAGE_PACK_EVENT_TYPE | typeof LEGACY_IMAGE_PACK_EVENT_TYPE,
+): { content: ImagePackContent; type: typeof type } | null {
+    const room = client.getRoom(roomId);
+    if (!room) return null;
+    const event = room.currentState.getStateEvents(type, stateKey);
+    if (!event) return null;
+    const content = parseImagePackContent(event.getContent());
+    if (!content) return null;
+    return { content, type };
+}
+
+function buildImagePackContent(draft: ImagePackDraft, previous?: ImagePackContent): ImagePackContent {
+    const images: Record<string, ImagePackImage> = previous ? { ...previous.images } : {};
+    if (draft.images) {
+        for (const [shortcode, image] of Object.entries(draft.images)) {
+            const cleaned: ImagePackImage = { url: image.url };
+            if (image.body !== undefined) cleaned.body = image.body;
+            if (image.info) cleaned.info = { ...image.info };
+            images[shortcode] = cleaned;
+        }
+    }
+    const pack: ImagePackContent["pack"] = previous?.pack
+        ? cloneImagePackContent({ images, pack: previous.pack }).pack ?? { usage: [IMAGE_PACK_USAGE_EMOTICON] }
+        : { usage: [IMAGE_PACK_USAGE_EMOTICON] };
+    if (draft.displayName !== undefined) pack.display_name = draft.displayName;
+    if (draft.avatarUrl !== undefined) pack.avatar_url = draft.avatarUrl;
+    if (draft.attribution !== undefined) pack.attribution = draft.attribution;
+    if (draft.usage !== undefined) pack.usage = [...draft.usage];
+    if (!pack.usage || pack.usage.length === 0) pack.usage = [IMAGE_PACK_USAGE_EMOTICON];
+    return { images, pack };
+}
+
+function pickPackEventType(client: MatrixClient, roomId: string, stateKey: string): typeof IMAGE_PACK_EVENT_TYPE {
+    // Prefer the stable `m.room.image_pack` event type. The legacy
+    // `im.ponies.room_emotes` event is still read for backwards compatibility,
+    // but new writes always go to the stable key.
+    void client;
+    void roomId;
+    void stateKey;
+    return IMAGE_PACK_EVENT_TYPE;
+}
+
+/**
+ * Create or replace a pack in a room (state event). The returned promise
+ * resolves with the new pack display name once the homeserver has accepted
+ * the state event.
+ */
+export async function createRoomImagePack(
+    client: MatrixClient,
+    roomId: string,
+    stateKey: string,
+    draft: ImagePackDraft,
+): Promise<void> {
+    const previous = readCurrentPackEvent(client, roomId, stateKey, IMAGE_PACK_EVENT_TYPE)?.content ??
+        readCurrentPackEvent(client, roomId, stateKey, LEGACY_IMAGE_PACK_EVENT_TYPE)?.content;
+    const content = buildImagePackContent(draft, previous);
+    const eventType = pickPackEventType(client, roomId, stateKey);
+    await client.sendStateEvent(roomId, eventType as never, content as never, stateKey);
+}
+
+/**
+ * Update only the pack-level metadata (display name / avatar / usage /
+ * attribution). Image entries are left untouched. Throws if the pack does
+ * not already exist; callers should use {@link createRoomImagePack} for
+ * the initial create path.
+ */
+export async function updateRoomImagePackMetadata(
+    client: MatrixClient,
+    roomId: string,
+    stateKey: string,
+    draft: ImagePackDraft,
+): Promise<void> {
+    const existing =
+        readCurrentPackEvent(client, roomId, stateKey, IMAGE_PACK_EVENT_TYPE) ??
+        readCurrentPackEvent(client, roomId, stateKey, LEGACY_IMAGE_PACK_EVENT_TYPE);
+    if (!existing) {
+        throw new Error(
+            `Cannot update room image pack ${stateKey} in ${roomId}: pack does not exist. ` +
+                `Use createRoomImagePack() to create it first.`,
+        );
+    }
+    const content = buildImagePackContent(draft, existing.content);
+    await client.sendStateEvent(roomId, existing.type as never, content as never, stateKey);
+}
+
+/**
+ * Add or update a single emote inside a room-scoped pack. If the pack does
+ * not exist yet, it is created with emoticon usage and the supplied image.
+ */
+export async function upsertRoomPackEmote(
+    client: MatrixClient,
+    roomId: string,
+    stateKey: string,
+    emote: EmoteEdit,
+): Promise<void> {
+    const existing =
+        readCurrentPackEvent(client, roomId, stateKey, IMAGE_PACK_EVENT_TYPE) ??
+        readCurrentPackEvent(client, roomId, stateKey, LEGACY_IMAGE_PACK_EVENT_TYPE);
+    const previous = existing?.content;
+    const content = buildImagePackContent({ images: { [emote.shortcode]: emote } }, previous);
+    const eventType = existing?.type ?? pickPackEventType(client, roomId, stateKey);
+    await client.sendStateEvent(roomId, eventType as never, content as never, stateKey);
+}
+
+/**
+ * Remove a single emote from a room-scoped pack. If the resulting pack has no
+ * images and no useful metadata, the pack is left as an empty pack rather than
+ * being deleted — state events in Matrix are immutable and the user must
+ * explicitly delete the pack via {@link deleteRoomImagePack} if desired.
+ */
+export async function removeRoomPackEmote(
+    client: MatrixClient,
+    roomId: string,
+    stateKey: string,
+    shortcode: string,
+): Promise<void> {
+    const existing =
+        readCurrentPackEvent(client, roomId, stateKey, IMAGE_PACK_EVENT_TYPE) ??
+        readCurrentPackEvent(client, roomId, stateKey, LEGACY_IMAGE_PACK_EVENT_TYPE);
+    if (!existing) return;
+    const nextImages = { ...existing.content.images };
+    delete nextImages[shortcode];
+    const content: ImagePackContent = { ...existing.content, images: nextImages };
+    await client.sendStateEvent(roomId, existing.type as never, content as never, stateKey);
+}
+
+/**
+ * Delete a room-scoped image pack by sending an empty state event with the
+ * same state key. The read helpers ignore empty packs (no images, no usage),
+ * so this effectively removes the pack from picker surfaces without leaving
+ * dangling state.
+ */
+/**
+ * Redact the state event that holds a room image pack. This is the preferred
+ * deletion path: a redacted state event does not appear at all in
+ * `room.currentState`, so the picker cannot re-pick it. Requires the event
+ * id of the state event (look it up via the resolver / read helpers).
+ */
+export async function redactRoomImagePack(
+    client: MatrixClient,
+    roomId: string,
+    eventId: string,
+): Promise<void> {
+    await client.redactEvent(roomId, eventId);
+}
+
+/**
+ * Reserved state key for the room image pack ordering marker. The event
+ * content has no `images` field, so the existing `parseImagePackContent`
+ * reader returns `null` for it — the marker is invisible to the picker.
+ * Module-side resolver reads it via {@link getRoomImagePackOrder} to
+ * honour user-supplied order.
+ */
+export const ROOM_IMAGE_PACK_ORDER_STATE_KEY = "_order";
+
+export interface RoomImagePackOrder {
+    stateKeys: string[];
+}
+
+export function getRoomImagePackOrder(
+    client: MatrixClient,
+    roomId: string,
+): RoomImagePackOrder | null {
+    const room = client.getRoom(roomId);
+    if (!room) return null;
+    const event = room.currentState.getStateEvents(
+        IMAGE_PACK_EVENT_TYPE,
+        ROOM_IMAGE_PACK_ORDER_STATE_KEY,
+    ) as { getContent(): unknown } | null;
+    if (!event) return null;
+    const content = event.getContent();
+    if (!isRecord(content) || !Array.isArray(content.stateKeys)) return null;
+    const stateKeys: string[] = [];
+    for (const entry of content.stateKeys) {
+        if (typeof entry === "string" && entry !== ROOM_IMAGE_PACK_ORDER_STATE_KEY) {
+            stateKeys.push(entry);
+        }
+    }
+    return { stateKeys };
+}
+
+/**
+ * Reorder a room's image pack list by writing the ordering marker event
+ * (state key `_order`). The marker stores an explicit `stateKeys` array
+ * so reordering is idempotent and survives any state-key renames. The
+ * marker is invisible to the existing read helpers (no `images` field)
+ * and is read modules-side by the resolver.
+ */
+export async function reorderRoomImagePacks(
+    client: MatrixClient,
+    roomId: string,
+    orderedStateKeys: string[],
+): Promise<void> {
+    if (orderedStateKeys.length === 0) {
+        await client.sendStateEvent(
+            roomId,
+            IMAGE_PACK_EVENT_TYPE as never,
+            {} as never,
+            ROOM_IMAGE_PACK_ORDER_STATE_KEY,
+        );
+        return;
+    }
+    await client.sendStateEvent(
+        roomId,
+        IMAGE_PACK_EVENT_TYPE as never,
+        { stateKeys: orderedStateKeys } as never,
+        ROOM_IMAGE_PACK_ORDER_STATE_KEY,
+    );
+}
+
+/**
+ * Low-level "delete" that writes an empty pack content. The existing
+ * reader keeps any pack whose parsed content is non-null, so this leaves
+ * a zero-emote entry in the picker. Prefer {@link redactRoomImagePack}
+ * via the resolver's event id for the user-facing delete path.
+ */
+export async function deleteRoomImagePack(
+    client: MatrixClient,
+    roomId: string,
+    stateKey: string,
+): Promise<void> {
+    const existing =
+        readCurrentPackEvent(client, roomId, stateKey, IMAGE_PACK_EVENT_TYPE) ??
+        readCurrentPackEvent(client, roomId, stateKey, LEGACY_IMAGE_PACK_EVENT_TYPE);
+    const eventType = existing?.type ?? pickPackEventType(client, roomId, stateKey);
+    await client.sendStateEvent(
+        roomId,
+        eventType as never,
+        { images: {}, pack: { usage: [IMAGE_PACK_USAGE_EMOTICON] } } as never,
+        stateKey,
+    );
+}
+function readRoomsContent(
+    client: MatrixClient,
+    type: typeof IMAGE_PACK_ROOMS_EVENT_TYPE | typeof LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
+): Record<string, Record<string, object>> {
+    const event = client.getAccountData(type as never);
+    const content = event?.getContent();
+    if (!isRecord(content) || !isRecord(content.rooms)) return {};
+    const rooms: Record<string, Record<string, object>> = {};
+    for (const [roomId, packs] of Object.entries(content.rooms)) {
+        if (!isRecord(packs)) continue;
+        rooms[roomId] = {};
+        for (const [stateKey, value] of Object.entries(packs)) {
+            rooms[roomId][stateKey] = isRecord(value) ? value : {};
+        }
+    }
+    return rooms;
+}
+
+async function writeRoomsContent(
+    client: MatrixClient,
+    type: typeof IMAGE_PACK_ROOMS_EVENT_TYPE | typeof LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
+    rooms: Record<string, Record<string, object>>,
+): Promise<void> {
+    await client.setAccountData(type as never, { rooms } as never);
+}
+
+/**
+ * Add (or update) a reference from the user's `m.image_pack.rooms` account
+ * data so the referenced pack becomes globally available. Writes the
+ * stable key and mirrors into the legacy `im.ponies.emote_rooms` key for
+ * older clients.
+ */
+export async function enableGlobalPack(
+    client: MatrixClient,
+    reference: GlobalPackReference,
+): Promise<void> {
+    const stable = readRoomsContent(client, IMAGE_PACK_ROOMS_EVENT_TYPE);
+    const stableRoom = { ...(stable[reference.roomId] ?? {}) };
+    stableRoom[reference.stateKey] = {};
+    stable[reference.roomId] = stableRoom;
+    await writeRoomsContent(client, IMAGE_PACK_ROOMS_EVENT_TYPE, stable);
+
+    const legacy = readRoomsContent(client, LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE);
+    const legacyRoom = { ...(legacy[reference.roomId] ?? {}) };
+    legacyRoom[reference.stateKey] = {};
+    legacy[reference.roomId] = legacyRoom;
+    await writeRoomsContent(client, LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, legacy);
+}
+
+/**
+ * Remove a reference from the user's `m.image_pack.rooms` account data so
+ * the pack is no longer available globally. Removes from both stable and
+ * legacy keys.
+ */
+export async function disableGlobalPack(
+    client: MatrixClient,
+    reference: GlobalPackReference,
+): Promise<void> {
+    const stable = readRoomsContent(client, IMAGE_PACK_ROOMS_EVENT_TYPE);
+    if (stable[reference.roomId]) {
+        const next = { ...stable[reference.roomId] };
+        delete next[reference.stateKey];
+        if (Object.keys(next).length === 0) delete stable[reference.roomId];
+        else stable[reference.roomId] = next;
+        await writeRoomsContent(client, IMAGE_PACK_ROOMS_EVENT_TYPE, stable);
+    }
+
+    const legacy = readRoomsContent(client, LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE);
+    if (legacy[reference.roomId]) {
+        const next = { ...legacy[reference.roomId] };
+        delete next[reference.stateKey];
+        if (Object.keys(next).length === 0) delete legacy[reference.roomId];
+        else legacy[reference.roomId] = next;
+        await writeRoomsContent(client, LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, legacy);
+    }
+}
+
+function readUserPackContent(
+    client: MatrixClient,
+    type: typeof LEGACY_USER_IMAGE_PACK_EVENT_TYPE | typeof IMAGE_PACK_EVENT_TYPE,
+): ImagePackContent {
+    const event = client.getAccountData(type as never);
+    if (!event) return { images: {}, pack: { usage: [IMAGE_PACK_USAGE_EMOTICON] } };
+    return parseImagePackContent(event.getContent()) ?? {
+        images: {},
+        pack: { usage: [IMAGE_PACK_USAGE_EMOTICON] },
+    };
+}
+
+async function writeUserPackContent(
+    client: MatrixClient,
+    type: typeof LEGACY_USER_IMAGE_PACK_EVENT_TYPE | typeof IMAGE_PACK_EVENT_TYPE,
+    content: ImagePackContent,
+): Promise<void> {
+    await client.setAccountData(type as never, content as never);
+}
+
+/**
+ * Update the user's personal (account-data) image pack. Writes the legacy
+ * `im.ponies.user_emotes` key for backwards compatibility with existing
+ * pickers. The stable `m.image_pack` key is not used at user scope per the
+ * spec, so user packs are emulated with the legacy account-data event.
+ */
+export async function upsertUserImagePack(
+    client: MatrixClient,
+    draft: ImagePackDraft,
+): Promise<void> {
+    const previous = readUserPackContent(client, LEGACY_USER_IMAGE_PACK_EVENT_TYPE);
+    const content = buildImagePackContent(draft, previous);
+    await writeUserPackContent(client, LEGACY_USER_IMAGE_PACK_EVENT_TYPE, content);
+}
+
+/**
+ * Add or update a single emote in the user's personal image pack.
+ */
+export async function upsertUserPackEmote(
+    client: MatrixClient,
+    emote: EmoteEdit,
+): Promise<void> {
+    await upsertUserImagePack(client, { images: { [emote.shortcode]: emote } });
+}
+
+/**
+ * Remove a single emote from the user's personal image pack.
+ */
+export async function removeUserPackEmote(
+    client: MatrixClient,
+    shortcode: string,
+): Promise<void> {
+    const previous = readUserPackContent(client, LEGACY_USER_IMAGE_PACK_EVENT_TYPE);
+    if (!previous.images[shortcode]) return;
+    const next: ImagePackContent = cloneImagePackContent(previous);
+    delete next.images[shortcode];
+    await writeUserPackContent(client, LEGACY_USER_IMAGE_PACK_EVENT_TYPE, next);
+}
+
+
+/**
+ * Bridge a live `MatrixClient` to the `PackWriters` contract expected by the
+ * `image-packs` module. This is the only place outside the module that
+ * knows about both layers, and it lives in `custom-emotes.ts` so the
+ * module can stay host-agnostic.
+ */
+export function createWritersFromClient(client: MatrixClient): PackWriters {
+    return {
+        createRoomImagePack: (roomId, stateKey, draft) =>
+            createRoomImagePack(client, roomId, stateKey, draft),
+        updateRoomImagePackMetadata: (roomId, stateKey, draft) =>
+            updateRoomImagePackMetadata(client, roomId, stateKey, draft),
+        deleteRoomImagePack: (roomId, stateKey) => deleteRoomImagePack(client, roomId, stateKey),
+        upsertRoomPackEmote: (roomId, stateKey, emote) => upsertRoomPackEmote(client, roomId, stateKey, emote),
+        removeRoomPackEmote: (roomId, stateKey, shortcode) =>
+            removeRoomPackEmote(client, roomId, stateKey, shortcode),
+        reorderRoomImagePacks: (roomId, orderedKeys) =>
+            reorderRoomImagePacks(client, roomId, orderedKeys),
+        redactRoomImagePack: (roomId, eventId) => redactRoomImagePack(client, roomId, eventId),
+        getRoomImagePackOrder: (roomId) => getRoomImagePackOrder(client, roomId),
+        upsertUserImagePack: (pack) => upsertUserImagePack(client, pack),
+        upsertUserPackEmote: (emote) => upsertUserPackEmote(client, emote),
+        removeUserPackEmote: (shortcode) => removeUserPackEmote(client, shortcode),
+        enableGlobalPack: (reference) => enableGlobalPack(client, reference),
+        disableGlobalPack: (reference) => disableGlobalPack(client, reference),
+    };
 }
