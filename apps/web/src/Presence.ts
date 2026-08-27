@@ -25,6 +25,7 @@ class Presence {
     private dispatcherRef?: string;
     private state?: SetPresence;
     private stopSignal?: PromiseWithResolvers<void>;
+    private stateChangeId = 0;
 
     /**
      * Start listening the user activity to evaluate his presence state.
@@ -56,6 +57,7 @@ class Presence {
      * Stop tracking user activity
      */
     public stop(): void {
+        this.stateChangeId++;
         this.stopSignal?.resolve();
         this.stopSignal = undefined;
         dis.unregister(this.dispatcherRef);
@@ -91,6 +93,7 @@ class Presence {
         }
 
         const oldState = this.state;
+        const stateChangeId = ++this.stateChangeId;
         this.state = newState;
 
         if (MatrixClientPeg.safeGet().isGuest()) {
@@ -102,7 +105,10 @@ class Presence {
             logger.debug("Presence:", newState);
         } catch (err) {
             logger.error("Failed to set presence:", err);
-            this.state = oldState;
+            // Ignore failures from transitions superseded by a newer lifecycle or state change.
+            if (stateChangeId === this.stateChangeId) {
+                this.state = oldState;
+            }
         }
     }
 }

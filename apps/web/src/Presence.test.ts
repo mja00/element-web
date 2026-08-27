@@ -8,6 +8,7 @@ Please see LICENSE files in the repository root for full details.
 // @vitest-environment happy-dom
 
 import { SetPresence } from "matrix-js-sdk/src/matrix";
+import { logger } from "matrix-js-sdk/src/logger";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { stubClient } from "test-utils";
@@ -56,5 +57,29 @@ describe("Presence", () => {
 
         await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
         expect(client.setSyncPresence).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not let a stale request roll back a restarted lifecycle", async () => {
+        vi.spyOn(logger, "error").mockImplementation(() => {});
+        const firstRequest = Promise.withResolvers<void>();
+        const secondRequest = Promise.withResolvers<void>();
+        client.setSyncPresence = vi
+            .fn()
+            .mockReturnValueOnce(firstRequest.promise)
+            .mockReturnValueOnce(secondRequest.promise);
+
+        const firstStart = Presence.start();
+        Presence.stop();
+        await firstStart;
+
+        started = Presence.start();
+        expect(Presence.getState()).toBe(SetPresence.Online);
+
+        firstRequest.reject(new Error("stale request failed"));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(Presence.getState()).toBe(SetPresence.Online);
+
+        secondRequest.resolve();
     });
 });
