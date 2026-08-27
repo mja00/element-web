@@ -29,6 +29,7 @@ import Modal from "./Modal";
 import ErrorDialog from "./components/views/dialogs/ErrorDialog";
 import UploadConfirmDialog from "./components/views/dialogs/UploadConfirmDialog";
 import { _t } from "./languageHandler";
+import SettingsStore from "./settings/SettingsStore";
 
 vi.mock("matrix-encrypt-attachment", () => ({ default: { encryptAttachment: vi.fn().mockResolvedValue({}) } }));
 
@@ -143,6 +144,38 @@ describe("ContentMessages", () => {
                     msgtype: MsgType.Image,
                 }),
             );
+        });
+
+        it("should send formatted markdown for an image caption when enabled", async () => {
+            vi.mocked(client.uploadContent).mockResolvedValue({ content_uri: "mxc://server/file" });
+            const settingsSpy = vi
+                .spyOn(SettingsStore, "getValue")
+                .mockImplementation((setting) => setting === "MessageComposerInput.useMarkdown");
+            const file = new File([], "photo.jpg", { type: "image/jpeg" });
+
+            await contentMessages.sendContentToRoom(
+                file,
+                roomId,
+                undefined,
+                client,
+                undefined,
+                undefined,
+                "**A photo**",
+            );
+
+            expect(client.sendMessage).toHaveBeenCalledWith(
+                roomId,
+                null,
+                expect.objectContaining({
+                    body: "**A photo**",
+                    filename: "photo.jpg",
+                    format: "org.matrix.custom.html",
+                    formatted_body: "<strong>A photo</strong>",
+                    msgtype: MsgType.Image,
+                }),
+            );
+
+            settingsSpy.mockRestore();
         });
 
         it("should use m.image for PNG files which cannot be parsed but successfully thumbnail", async () => {

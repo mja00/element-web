@@ -44,6 +44,20 @@ describe("<UploadConfirmDialog />", () => {
         expect(onFinished).toHaveBeenCalledWith(true, false, "A useful description");
     });
 
+    it("should include an optional caption when uploading all images", async () => {
+        vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:null/1234-5678-9101-1121");
+        const onFinished = vi.fn();
+        const file = new File([secureRandomString(1024)], "image.png", { type: "image/png" });
+        const { getByLabelText, getByRole } = render(
+            <UploadConfirmDialog file={file} currentIndex={0} totalFiles={2} allowCaption onFinished={onFinished} />,
+        );
+
+        await userEvent.type(getByLabelText("Caption"), "  A useful description  ");
+        await userEvent.click(getByRole("button", { name: "Upload all" }));
+
+        expect(onFinished).toHaveBeenCalledWith(true, true, "A useful description");
+    });
+
     it("should not show a caption field for non-image files", () => {
         const file = new File([secureRandomString(1024)], "notes.txt", { type: "text/plain" });
         const { queryByLabelText } = render(
