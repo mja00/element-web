@@ -24,20 +24,27 @@ class Presence {
     private unavailableTimer?: Timer;
     private dispatcherRef?: string;
     private state?: SetPresence;
+    private stopSignal?: PromiseWithResolvers<void>;
 
     /**
      * Start listening the user activity to evaluate his presence state.
      * Any state change will be sent to the homeserver.
      */
     public async start(): Promise<void> {
-        this.unavailableTimer = new Timer(UNAVAILABLE_TIME_MS);
+        if (this.unavailableTimer) return;
+
+        const timer = new Timer(UNAVAILABLE_TIME_MS);
+        const stopSignal = Promise.withResolvers<void>();
+        this.unavailableTimer = timer;
+        this.stopSignal = stopSignal;
         // Start the inactivity window with the initial online state so idle tabs become unavailable.
-        this.unavailableTimer.start();
+        timer.start();
         this.dispatcherRef = dis.register(this.onAction);
         void this.setState(SetPresence.Online);
-        while (this.unavailableTimer) {
+        while (this.unavailableTimer === timer) {
             try {
-                await this.unavailableTimer.finished();
+                await Promise.race([timer.finished(), stopSignal.promise]);
+                if (this.unavailableTimer !== timer) return;
                 await this.setState(SetPresence.Unavailable);
             } catch {
                 /* aborted, stop got called */
@@ -49,6 +56,8 @@ class Presence {
      * Stop tracking user activity
      */
     public stop(): void {
+        this.stopSignal?.resolve();
+        this.stopSignal = undefined;
         dis.unregister(this.dispatcherRef);
         this.dispatcherRef = undefined;
         this.unavailableTimer?.abort();
