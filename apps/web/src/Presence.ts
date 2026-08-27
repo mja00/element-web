@@ -31,8 +31,10 @@ class Presence {
      */
     public async start(): Promise<void> {
         this.unavailableTimer = new Timer(UNAVAILABLE_TIME_MS);
-        // the user_activity_start action starts the timer
+        // Start the inactivity window with the initial online state so idle tabs become unavailable.
+        this.unavailableTimer.start();
         this.dispatcherRef = dis.register(this.onAction);
+        void this.setState(SetPresence.Online);
         while (this.unavailableTimer) {
             try {
                 await this.unavailableTimer.finished();
@@ -51,6 +53,7 @@ class Presence {
         this.dispatcherRef = undefined;
         this.unavailableTimer?.abort();
         this.unavailableTimer = undefined;
+        this.state = undefined;
     }
 
     /**
