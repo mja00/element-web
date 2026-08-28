@@ -10,8 +10,8 @@ import React from "react";
 import type { Api, Module, ModuleFactory } from "@element-hq/element-web-module-api";
 
 import { ImagePacksSettings } from "./ImagePacksSettings.tsx";
+import { ensureImagePacksStyles } from "./style.ts";
 import { useImagePacks, type UseImagePacksOptions } from "./useImagePacks.ts";
-import styleText from "./style.css?raw";
 /**
  * Shape the host application must expose on `api.customisations` for the
  * module to mount its settings UI. The host constructs a `PackWriters`
@@ -30,12 +30,7 @@ class ImagePacksModule implements Module {
     public constructor(private readonly api: Api) {}
 
     public async load(): Promise<void> {
-        if (!document.getElementById("mx-image-packs-module-styles")) {
-            const style = document.createElement("style");
-            style.id = "mx-image-packs-module-styles";
-            style.textContent = styleText;
-            document.head.appendChild(style);
-        }
+        ensureImagePacksStyles();
 
         const customisations = this.api.customisations as unknown as ImagePacksMountCustomisations;
 

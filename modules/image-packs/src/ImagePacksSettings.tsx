@@ -5,9 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE files in the repository root for full details.
 */
 
-import React from "react";
+import React, { useInsertionEffect } from "react";
 
 import { PackListPanel } from "./PackListPanel.tsx";
+import { ensureImagePacksStyles } from "./style.ts";
 import { DiscoveryPanel } from "./DiscoveryPanel.tsx";
 import type { UseImagePacksResult } from "./useImagePacks.ts";
 
@@ -27,6 +28,10 @@ export interface ImagePacksSettingsProps {
  */
 export function ImagePacksSettings(props: ImagePacksSettingsProps): React.ReactElement {
     const { api, roomId, hideUserSection, hideDiscovery } = props;
+    useInsertionEffect(() => {
+        ensureImagePacksStyles();
+    }, []);
+
     const userPacks = api.packs.filter((pack) => pack.scope === "user");
     const roomPacks = roomId ? api.packs.filter((pack) => pack.roomId === roomId && pack.scope !== "user") : [];
     const totalEmotes = api.packs.reduce((count, pack) => count + Object.keys(pack.pack.images).length, 0);
