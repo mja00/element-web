@@ -9,7 +9,7 @@ Please see LICENSE files in the repository root for full details.
 
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DiscoveryPanel } from "./DiscoveryPanel.tsx";
@@ -135,7 +135,7 @@ describe("ImagePacksSettings", () => {
 });
 
 describe("PackListPanel", () => {
-    it("renders resolved media thumbnails with initials as a fallback", () => {
+    it("renders resolved media thumbnails and falls back when one cannot load", () => {
         const api = makeApi({
             packs: [personalPack],
             getImageUrl: (url, width, height) =>
@@ -148,6 +148,9 @@ describe("PackListPanel", () => {
         expect(images).toHaveLength(2);
         expect(images[0]?.getAttribute("src")).toBe(`https://media.example/${encodeURIComponent(emote.url)}?w=40&h=40`);
         expect(images[1]?.getAttribute("src")).toBe(`https://media.example/${encodeURIComponent(emote.url)}?w=40&h=40`);
+        fireEvent.error(images[0]!);
+        expect(screen.getByTestId("pack-personal").querySelectorAll("img")).toHaveLength(1);
+        expect(screen.getByTestId("pack-personal").textContent).toContain("WA");
     });
 
     it("renders errors and an empty state", () => {
