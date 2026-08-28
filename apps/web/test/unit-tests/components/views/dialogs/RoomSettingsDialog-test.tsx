@@ -26,6 +26,15 @@ import { UIFeature } from "../../../../../src/settings/UIFeature";
 import DMRoomMap from "../../../../../src/utils/DMRoomMap";
 import { TestSDKContext } from "../../../TestSDKContext.ts";
 
+jest.mock("@element-hq/element-web-module-image-packs", () => {
+    const React = jest.requireActual<typeof import("react")>("react");
+    return {
+        ImagePacksSettings: ({ roomId }: { roomId?: string }) =>
+            React.createElement("div", { "data-testid": "image-packs-tab" }, roomId ?? "user"),
+        useImagePacks: jest.fn(() => ({})),
+    };
+});
+
 describe("<RoomSettingsDialog />", () => {
     const userId = "@alice:server.org";
     const mockClient = getMockClientWithEventEmitter({

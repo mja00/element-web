@@ -30,6 +30,15 @@ import { TestSDKContext } from "../../../TestSDKContext.ts";
 import { type FeatureSettingKey } from "../../../../../src/settings/Settings.tsx";
 import { makeDelegatedAuthMetadata } from "../../../../test-utils/auth.ts";
 
+jest.mock("@element-hq/element-web-module-image-packs", () => {
+    const React = jest.requireActual<typeof import("react")>("react");
+    return {
+        ImagePacksSettings: ({ roomId }: { roomId?: string }) =>
+            React.createElement("div", { "data-testid": "image-packs-tab" }, roomId ?? "user"),
+        useImagePacks: jest.fn(() => ({})),
+    };
+});
+
 mockPlatformPeg({
     supportsSpellCheckSettings: jest.fn().mockReturnValue(false),
     getAppVersion: jest.fn().mockResolvedValue("1"),
