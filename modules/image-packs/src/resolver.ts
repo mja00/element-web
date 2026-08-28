@@ -11,14 +11,17 @@ import {
     LEGACY_IMAGE_PACK_EVENT_TYPE,
     LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
     LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
+    LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY,
+    ROOM_IMAGE_PACK_ORDER_EVENT_TYPE,
 } from "./types.ts";
-import type { DiscoverySource, ImagePackDefinition, ImagePackScope } from "./types.ts";
+import type { DiscoverySource, ImagePackDefinition, ImagePackKind, ImagePackScope } from "./types.ts";
 export {
     IMAGE_PACK_EVENT_TYPE,
     IMAGE_PACK_ROOMS_EVENT_TYPE,
     LEGACY_IMAGE_PACK_EVENT_TYPE,
     LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
     LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
+    ROOM_IMAGE_PACK_ORDER_EVENT_TYPE,
 };
 export interface ResolverClient {
     getUserId(): string | null;
@@ -42,46 +45,77 @@ export interface ResolvedPackSummary {
     roomId: string;
     stateKey: string;
     scope: ImagePackScope;
+    kind: ImagePackKind;
+    eventId?: string;
     displayName: string;
     pack: ImagePackDefinition;
 }
 
-function readPackEvent(room: ResolverRoom, stateKey: string): ResolvedPackSummary | null {
-    const stable = room.currentState.getStateEvents(IMAGE_PACK_EVENT_TYPE, stateKey) as
-        | { getContent(): unknown }
-        | null
-        | undefined;
-    const legacy = room.currentState.getStateEvents(LEGACY_IMAGE_PACK_EVENT_TYPE, stateKey) as
-        | { getContent(): unknown }
-        | null
-        | undefined;
-    const event = stable ?? legacy;
-    if (!event) return null;
-    const content = event.getContent();
-    if (!isRecord(content)) return null;
+function readPackContent(
+    content: Record<string, unknown>,
+    fallbackDisplayName: string,
+    roomName?: string,
+): ImagePackDefinition {
     const images = isRecord(content.images) ? content.images : {};
     const packMeta = isRecord(content.pack) ? content.pack : {};
-    const def: ImagePackDefinition = {
-        displayName: typeof packMeta.display_name === "string" ? packMeta.display_name : room.name ?? "",
+    const pack: ImagePackDefinition = {
+        displayName:
+            typeof packMeta.display_name === "string" && packMeta.display_name.trim()
+                ? packMeta.display_name.trim()
+                : (roomName ?? fallbackDisplayName),
         images: Object.fromEntries(
-            Object.entries(images).map(([k, v]) => {
-                if (!isRecord(v) || typeof v.url !== "string") return [k, { shortcode: k, url: "" }];
-                const image: ImagePackDefinition["images"][string] = { shortcode: k, url: v.url };
-                if (typeof v.body === "string") image.body = v.body;
-                if (isRecord(v.info)) image.info = v.info as Record<string, unknown>;
-                return [k, image];
+            Object.entries(images).flatMap(([shortcode, value]) => {
+                if (!isRecord(value) || typeof value.url !== "string" || !value.url.startsWith("mxc://")) return [];
+                const image: ImagePackDefinition["images"][string] = { shortcode, url: value.url };
+                if (typeof value.body === "string") image.body = value.body;
+                if (isRecord(value.info)) image.info = value.info;
+                return [[shortcode, image] as const];
             }),
         ),
     };
-    if (typeof packMeta.avatar_url === "string") def.avatarUrl = packMeta.avatar_url;
-    if (typeof packMeta.attribution === "string") def.attribution = packMeta.attribution;
+    if (typeof packMeta.avatar_url === "string") pack.avatarUrl = packMeta.avatar_url;
+    if (typeof packMeta.attribution === "string") pack.attribution = packMeta.attribution;
     if (Array.isArray(packMeta.usage)) {
-        def.usage = packMeta.usage.filter((v): v is string => typeof v === "string");
+        pack.usage = packMeta.usage.filter((value): value is string => typeof value === "string");
     }
+    return pack;
+}
+
+function hasVisiblePackContent(content: Record<string, unknown>): boolean {
+    if (isRecord(content.images)) {
+        for (const image of Object.values(content.images)) {
+            if (isRecord(image) && typeof image.url === "string" && image.url.startsWith("mxc://")) return true;
+        }
+    }
+    const pack = content.pack;
+    if (!isRecord(pack)) return false;
+    return ["display_name", "avatar_url", "attribution"].some(
+        (key) => typeof pack[key] === "string" && pack[key].length > 0,
+    );
+}
+
+function readPackEvent(room: ResolverRoom, stateKey: string): ResolvedPackSummary | null {
+    const stable = room.currentState.getStateEvents(IMAGE_PACK_EVENT_TYPE, stateKey) as
+        | { getContent(): unknown; getId?: () => string; isRedacted?: () => boolean }
+        | null
+        | undefined;
+    const legacy = room.currentState.getStateEvents(LEGACY_IMAGE_PACK_EVENT_TYPE, stateKey) as
+        | { getContent(): unknown; getId?: () => string; isRedacted?: () => boolean }
+        | null
+        | undefined;
+    const event = stable ?? legacy;
+    if (!event || typeof event.getContent !== "function") return null;
+    if (event.isRedacted?.()) return null;
+    const content = event.getContent();
+    if (!isRecord(content)) return null;
+    if (!hasVisiblePackContent(content)) return null;
+    const def = readPackContent(content, "", room.name);
     return {
         roomId: room.roomId,
         stateKey,
         scope: "room",
+        kind: "room",
+        eventId: event.getId?.(),
         displayName: def.displayName,
         pack: def,
     };
@@ -110,6 +144,7 @@ export function resolveEnabledPacks(
         for (const [globalRoomId, packs] of Object.entries(content.rooms)) {
             if (!isRecord(packs)) continue;
             for (const stateKey of Object.keys(packs)) {
+                if (stateKey === LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY) continue;
                 const referenced = client.getRoom(globalRoomId);
                 if (!referenced) continue;
                 const summary = readPackEvent(referenced, stateKey);
@@ -117,7 +152,7 @@ export function resolveEnabledPacks(
                 const key = `${summary.roomId}\u0000${summary.stateKey}`;
                 if (seen.has(key)) continue;
                 seen.add(key);
-                out.push({ ...summary, scope: "user" });
+                out.push({ ...summary, scope: "user", kind: "global" });
             }
         }
     }
@@ -126,19 +161,15 @@ export function resolveEnabledPacks(
     const personal = client.getAccountData(LEGACY_USER_IMAGE_PACK_EVENT_TYPE);
     if (personal) {
         const content = personal.getContent();
-        if (isRecord(content) && isRecord(content.images)) {
+        if (isRecord(content) && hasVisiblePackContent(content)) {
+            const personalPack = readPackContent(content, "Personal");
             const summary: ResolvedPackSummary = {
                 roomId: client.getUserId() ?? "",
                 stateKey: LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
                 scope: "user",
-                displayName:
-                    (isRecord(content.pack) && typeof content.pack.display_name === "string"
-                        ? content.pack.display_name
-                        : "Personal") ?? "Personal",
-                pack: {
-                    displayName: "Personal",
-                    images: {},
-                },
+                kind: "personal",
+                displayName: personalPack.displayName || "Personal",
+                pack: personalPack,
             };
             if (!seen.has(summary.stateKey)) {
                 seen.add(summary.stateKey);
@@ -155,7 +186,7 @@ export function resolveEnabledPacks(
         for (const event of events) {
             const candidate = event as { getStateKey?: () => string; getContent: () => unknown };
             const stateKey = candidate.getStateKey?.() ?? "";
-            if (stateKey === "_order") continue;
+            if (stateKey === LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY) continue;
             const summary = readPackEvent(room, stateKey);
             if (!summary) continue;
             const key = `${summary.roomId}\u0000${summary.stateKey}`;
@@ -164,15 +195,13 @@ export function resolveEnabledPacks(
             roomPacks.push({ ...summary, scope: "room" });
         }
     }
-    const orderEvent = room.currentState.getStateEvents(IMAGE_PACK_EVENT_TYPE, "_order") as
-        | { getContent(): unknown }
-        | null
-        | undefined;
-    if (orderEvent) {
-        const content = orderEvent.getContent();
-        if (isRecord(content) && Array.isArray(content.stateKeys)) {
+    const orderEvent = client.getAccountData(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE);
+    const orderContent = orderEvent?.getContent();
+    if (isRecord(orderContent) && isRecord(orderContent.rooms)) {
+        const stateKeys = orderContent.rooms[room.roomId];
+        if (Array.isArray(stateKeys)) {
             const rank = new Map<string, number>();
-            content.stateKeys.forEach((key, index) => {
+            stateKeys.forEach((key, index) => {
                 if (typeof key === "string") rank.set(key, index);
             });
             roomPacks.sort((a, b) => {
@@ -197,13 +226,13 @@ export function resolveEnabledPacks(
             for (const event of events) {
                 const candidate = event as { getStateKey?: () => string };
                 const stateKey = candidate.getStateKey?.() ?? "";
-                if (stateKey === "_order") continue;
+                if (stateKey === LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY) continue;
                 const summary = readPackEvent(ancestor, stateKey);
                 if (!summary) continue;
                 const key = `${summary.roomId}\u0000${summary.stateKey}`;
                 if (seen.has(key)) continue;
                 seen.add(key);
-                out.push({ ...summary, scope: "space" });
+                out.push({ ...summary, scope: "space", kind: "space" });
             }
         }
     }
@@ -227,10 +256,6 @@ export function listEnabledSourceIds(client: ResolverClient): Set<string> {
     return out;
 }
 
-
-export function discoverySourcesForResolver(
-    sources: readonly DiscoverySource[],
-): DiscoverySource[] {
+export function discoverySourcesForResolver(sources: readonly DiscoverySource[]): DiscoverySource[] {
     return [...sources].sort((a, b) => a.id.localeCompare(b.id));
 }
-

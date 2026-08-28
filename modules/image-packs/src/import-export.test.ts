@@ -22,10 +22,25 @@ const basePack: ImagePackDefinition = {
 };
 
 describe("import-export", () => {
-    it("round-trips a pack through versioned envelope", () => {
+    it("round-trips a pack through the raw MSC2545 shape", () => {
         const payload = exportPackJson(basePack);
         const restored = parsePackJson(payload);
         expect(restored).toEqual(basePack);
+    });
+
+    it("still reads the former versioned camelCase envelope", () => {
+        expect(
+            parsePackJson({
+                version: 1,
+                pack: {
+                    displayName: "Legacy",
+                    images: { wave: { url: "mxc://example.org/wave" } },
+                },
+            }),
+        ).toEqual({
+            displayName: "Legacy",
+            images: { wave: { shortcode: "wave", url: "mxc://example.org/wave" } },
+        });
     });
 
     it("round-trips a pack through bare MSC2545 wire format", () => {
@@ -66,16 +81,30 @@ describe("import-export", () => {
         ).toThrow(PackImportError);
     });
 
-    it("requires display_name on the pack", () => {
-        expect(() =>
+    it("accepts packs without optional pack metadata", () => {
+        expect(
             parsePackJson({
-                version: 1,
-                pack: {
-                    images: { foo: { url: "mxc://example.org/foo" } },
-                    pack: { display_name: "" },
-                },
+                images: { foo: { url: "mxc://example.org/foo" } },
             }),
-        ).toThrow(PackImportError);
+        ).toEqual({
+            displayName: "",
+            images: { foo: { shortcode: "foo", url: "mxc://example.org/foo" } },
+        });
+    });
+
+    it("uses discovery metadata when a wire pack omits display_name", () => {
+        expect(parsePackJson({ images: { foo: { url: "mxc://example.org/foo" } } }, "From index").displayName).toBe(
+            "From index",
+        );
+    });
+
+    it("does not turn an all-usage pack into an emoticon-only pack on export", () => {
+        const exported = exportPackJson({
+            displayName: "All uses",
+            usage: [],
+            images: { wave: { shortcode: "wave", url: "mxc://example.org/wave" } },
+        });
+        expect(exported.pack?.usage).toEqual([]);
     });
 
     it("refuses input that is neither an envelope nor a pack", () => {

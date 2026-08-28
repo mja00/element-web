@@ -10,14 +10,12 @@ import { describe, expect, it } from "vitest";
 import {
     addDiscoverySource,
     fetchDiscoveryPack,
+    mergeDiscoveryPackMetadata,
     readDiscoverySources,
     removeDiscoverySource,
     resolveDiscoverySource,
 } from "./discovery.ts";
-import {
-    MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
-    MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
-} from "./types.ts";
+import { IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE } from "./types.ts";
 import type { AccountDataWriter } from "./discovery.ts";
 
 class FakeWriter implements AccountDataWriter {
@@ -38,12 +36,12 @@ class FakeWriter implements AccountDataWriter {
     }
 }
 
-describe("MSC2654 discovery sources", () => {
+describe("image-pack discovery sources", () => {
     it("adds and reads a source from the stable event type", async () => {
         const writer = new FakeWriter();
         const list = await addDiscoverySource(writer, { id: "test", url: "https://example.org/index.json" });
         expect(list.map((s) => s.id)).toEqual(["test"]);
-        expect(writer.raw(MSC2654_DISCOVERY_SOURCES_EVENT_TYPE)).toEqual({
+        expect(writer.raw(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE)).toEqual({
             sources: [{ id: "test", url: "https://example.org/index.json", displayName: "example.org" }],
         });
         expect(readDiscoverySources(writer).map((s) => s.id)).toEqual(["test"]);
@@ -51,10 +49,19 @@ describe("MSC2654 discovery sources", () => {
 
     it("falls back to the unstable event type when the stable one is empty", async () => {
         const writer = new FakeWriter();
-        await writer.setAccountData(MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE, {
+        await writer.setAccountData(IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE, {
             sources: [{ id: "u", url: "https://example.org/u.json" }],
         });
         expect(readDiscoverySources(writer).map((s) => s.id)).toEqual(["u"]);
+    });
+
+    it("keeps a present stable event authoritative even when it is empty", async () => {
+        const writer = new FakeWriter();
+        await writer.setAccountData(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, { sources: [] });
+        await writer.setAccountData(IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE, {
+            sources: [{ id: "u", url: "https://example.org/u.json" }],
+        });
+        expect(readDiscoverySources(writer)).toEqual([]);
     });
 
     it("removes a source by id", async () => {
@@ -69,6 +76,28 @@ describe("MSC2654 discovery sources", () => {
         const writer = new FakeWriter();
         await expect(addDiscoverySource(writer, { id: "", url: "https://e/" })).rejects.toThrow();
         await expect(addDiscoverySource(writer, { id: "x", url: "" })).rejects.toThrow();
+        await expect(addDiscoverySource(writer, { id: "x", url: "not a url" })).rejects.toThrow();
+    });
+
+    it("merges legacy unstable sources when adding a stable source", async () => {
+        const writer = new FakeWriter();
+        await writer.setAccountData(IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE, {
+            sources: [{ id: "old", url: "https://example.org/old.json" }],
+        });
+        const list = await addDiscoverySource(writer, { id: "new", url: "https://example.org/new.json" });
+        expect(list.map((source) => source.id).sort()).toEqual(["new", "old"]);
+    });
+
+    it("fills missing pack metadata from the discovery index", () => {
+        expect(
+            mergeDiscoveryPackMetadata(
+                { images: { wave: { url: "mxc://example.org/wave" } } },
+                { id: "wave", url: "https://example.org/wave.json", displayName: "Waves" },
+            ),
+        ).toEqual({
+            images: { wave: { url: "mxc://example.org/wave" } },
+            pack: { display_name: "Waves" },
+        });
     });
 
     it("parses a discovery index and fetches a single pack", async () => {
@@ -96,7 +125,11 @@ describe("MSC2654 discovery sources", () => {
     });
 
     it("rejects malformed discovery indices", async () => {
-        const fetcher = { async fetchJson(): Promise<unknown> { return { wrong: true }; } };
+        const fetcher = {
+            async fetchJson(): Promise<unknown> {
+                return { wrong: true };
+            },
+        };
         await expect(resolveDiscoverySource({ id: "x", url: "https://e/" }, fetcher)).rejects.toThrow();
     });
 });

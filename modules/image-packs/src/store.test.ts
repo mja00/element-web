@@ -13,6 +13,7 @@ import {
     addUserEmote,
     createRoomPack,
     deleteRoomPack,
+    deleteUserPack,
     disablePackGlobally,
     editRoomEmote,
     editUserEmote,
@@ -71,6 +72,14 @@ class FakeWriters implements PackWriters {
         this.calls.push({ op: "upsertUserImagePack", args: [pack] });
     }
 
+    public async replaceUserImagePack(pack: ImagePackDefinition): Promise<void> {
+        this.calls.push({ op: "replaceUserImagePack", args: [pack] });
+    }
+
+    public async deleteUserImagePack(): Promise<void> {
+        this.calls.push({ op: "deleteUserImagePack", args: [] });
+    }
+
     public async upsertUserPackEmote(emote: EmoteDefinition): Promise<void> {
         this.calls.push({ op: "upsertUserPackEmote", args: [emote] });
     }
@@ -119,6 +128,7 @@ describe("pack store", () => {
             stateKey: "wave-pack",
             displayName: "Wave Pack",
             images: { wave: { shortcode: "wave", url: "mxc://e/wave" } },
+            usage: [],
         });
         expect(writers.calls[0]).toEqual({
             op: "createRoomImagePack",
@@ -127,10 +137,21 @@ describe("pack store", () => {
                 "wave-pack",
                 {
                     displayName: "Wave Pack",
+                    usage: [],
                     images: { wave: { shortcode: "wave", url: "mxc://e/wave" } },
                 },
             ],
         });
+    });
+
+    it("rejects the reserved legacy order state key", async () => {
+        await expect(
+            createRoomPack(new FakeWriters(), {
+                roomId: "!r:example.org",
+                stateKey: "_order",
+                displayName: "Order",
+            }),
+        ).rejects.toThrow();
     });
 
     it("renames a pack without touching other metadata fields", async () => {
@@ -187,6 +208,12 @@ describe("pack store", () => {
         ]);
     });
 
+    it("deletes the personal pack through its dedicated writer", async () => {
+        const writers = new FakeWriters();
+        await deleteUserPack(writers);
+        expect(writers.calls[0]).toEqual({ op: "deleteUserImagePack", args: [] });
+    });
+
     it("installs a parsed pack into a room", async () => {
         const writers = new FakeWriters();
         const payload = {
@@ -202,12 +229,21 @@ describe("pack store", () => {
         expect(writers.calls[0]?.args[1]).toBe("wave");
     });
 
+    it("rejects discovery packs that would collide with the legacy order key", async () => {
+        await expect(
+            installPackToRoom(new FakeWriters(), "!r", "_order", {
+                images: { wave: { url: "mxc://e/wave" } },
+            }),
+        ).rejects.toThrow();
+    });
+
     it("survives non-throwing packJsonToRoomInput conversions", () => {
         const pack: ImagePackDefinition = {
             displayName: "P",
             images: { wave: { shortcode: "wave", url: "mxc://e/wave" } },
             avatarUrl: "mxc://e/avatar",
             attribution: "att",
+            usage: [],
         };
         const input = packJsonToRoomInput("!r", "k", pack);
         expect(toDraft(input)).toEqual({
@@ -215,6 +251,7 @@ describe("pack store", () => {
             images: pack.images,
             avatarUrl: "mxc://e/avatar",
             attribution: "att",
+            usage: [],
         });
     });
 
@@ -239,6 +276,6 @@ describe("pack store", () => {
         const writers = new FakeWriters();
         const pack: ImagePackDefinition = { displayName: "All", images: {} };
         await setUserPack(writers, pack);
-        expect(writers.calls[0]).toEqual({ op: "upsertUserImagePack", args: [pack] });
+        expect(writers.calls[0]).toEqual({ op: "replaceUserImagePack", args: [pack] });
     });
 });

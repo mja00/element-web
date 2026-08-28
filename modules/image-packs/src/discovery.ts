@@ -8,8 +8,10 @@ Please see LICENSE files in the repository root for full details.
 import { z } from "zod";
 
 import {
-    MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
-    MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+    IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+    IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+    LEGACY_MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
+    LEGACY_MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
     type DiscoveryIndex,
     type DiscoveryIndexEntry,
     type DiscoverySource,
@@ -24,21 +26,28 @@ export class DiscoverySourceError extends Error {
 
 const sourceSchema = z.object({
     id: z.string().min(1),
-    url: z.string().url(),
+    url: z
+        .string()
+        .url()
+        .refine((url) => /^https?:\/\//i.test(url), {
+            message: "Discovery source URL must use http or https.",
+        }),
     displayName: z.string().optional(),
 });
 
 const indexEntrySchema = z.object({
     id: z.string().min(1),
-    url: z.string().url(),
+    url: z
+        .string()
+        .url()
+        .refine((url) => /^https?:\/\//i.test(url), {
+            message: "Pack URL must use http or https.",
+        }),
     display_name: z.string().optional(),
     avatar_url: z.string().optional(),
     attribution: z.string().optional(),
 });
-const indexSchema = z.union([
-    z.object({ packs: z.array(indexEntrySchema) }),
-    z.array(indexEntrySchema),
-]);
+const indexSchema = z.union([z.object({ packs: z.array(indexEntrySchema) }), z.array(indexEntrySchema)]);
 
 interface RawDiscoveryIndexEntry {
     id: string;
@@ -70,6 +79,17 @@ function normaliseSource(source: DiscoverySource): DiscoverySource {
     return { id: source.id, url: source.url, displayName: source.displayName ?? deriveDisplayName(source.url) };
 }
 
+function mergeSources(sources: readonly DiscoverySource[]): DiscoverySource[] {
+    const byId = new Map<string, DiscoverySource>();
+    for (const source of sources) byId.set(source.id, normaliseSource(source));
+    return [...byId.values()];
+}
+
+function hasAccountData(writer: AccountDataWriter, eventType: string): boolean {
+    const event = writer.getAccountData(eventType);
+    return event !== null && event !== undefined && event.getContent() !== undefined;
+}
+
 function readSources(writer: AccountDataWriter, eventType: string): DiscoverySource[] {
     const event = writer.getAccountData(eventType);
     const content = event?.getContent();
@@ -85,61 +105,60 @@ function readSources(writer: AccountDataWriter, eventType: string): DiscoverySou
     return out;
 }
 
-async function writeSources(
-    writer: AccountDataWriter,
-    eventType: string,
-    sources: DiscoverySource[],
-): Promise<void> {
+async function writeSources(writer: AccountDataWriter, eventType: string, sources: DiscoverySource[]): Promise<void> {
     await writer.setAccountData(eventType, { sources: sources.map(normaliseSource) });
 }
 
 /**
- * Read the user's configured MSC2654 discovery sources. Reads the stable
- * event type first, then falls back to the unstable prefix so older clients
- * that predate the merged spec continue to work.
+ * Read the user's configured image-pack discovery sources. The private stable
+ * key is authoritative when present, with legacy and unstable keys as fallbacks.
  */
 export function readDiscoverySources(writer: AccountDataWriter): DiscoverySource[] {
-    const stable = readSources(writer, MSC2654_DISCOVERY_SOURCES_EVENT_TYPE);
-    if (stable.length > 0) return stable;
-    return readSources(writer, MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE);
+    for (const eventType of [IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, LEGACY_MSC2654_DISCOVERY_SOURCES_EVENT_TYPE]) {
+        if (hasAccountData(writer, eventType)) return mergeSources(readSources(writer, eventType));
+    }
+    for (const eventType of [
+        IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+        LEGACY_MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+    ]) {
+        if (hasAccountData(writer, eventType)) return mergeSources(readSources(writer, eventType));
+    }
+    return [];
 }
 
 export async function addDiscoverySource(
     writer: AccountDataWriter,
     source: DiscoverySource,
 ): Promise<DiscoverySource[]> {
-    if (!source.id.trim() || !source.url.trim()) {
-        throw new DiscoverySourceError("Discovery source requires both id and url.");
-    }
-    const stable = readSources(writer, MSC2654_DISCOVERY_SOURCES_EVENT_TYPE);
-    const unstable = readSources(writer, MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE);
-    const next = stable.filter((s) => s.id !== source.id).concat(normaliseSource(source));
-    await writeSources(writer, MSC2654_DISCOVERY_SOURCES_EVENT_TYPE, next);
-    if (unstable.length > 0) {
-        const nextUnstable = unstable.filter((s) => s.id !== source.id).concat(normaliseSource(source));
-        await writeSources(writer, MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE, nextUnstable);
-    }
+    const parsed = sourceSchema.safeParse({ ...source, id: source.id.trim(), url: source.url.trim() });
+    if (!parsed.success) throw new DiscoverySourceError(parsed.error.issues[0]?.message ?? "Invalid discovery source.");
+    const current = mergeSources(
+        [
+            IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+            IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+            LEGACY_MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
+            LEGACY_MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+        ].flatMap((eventType) => readSources(writer, eventType)),
+    );
+    const next = [...current.filter((item) => item.id !== parsed.data.id), normaliseSource(parsed.data)];
+    await writeSources(writer, IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, next);
     return readDiscoverySources(writer);
 }
 
-export async function removeDiscoverySource(
-    writer: AccountDataWriter,
-    sourceId: string,
-): Promise<DiscoverySource[]> {
-    const stable = readSources(writer, MSC2654_DISCOVERY_SOURCES_EVENT_TYPE);
-    const unstable = readSources(writer, MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE);
+export async function removeDiscoverySource(writer: AccountDataWriter, sourceId: string): Promise<DiscoverySource[]> {
+    const current = mergeSources(
+        [
+            IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+            IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+            LEGACY_MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
+            LEGACY_MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+        ].flatMap((eventType) => readSources(writer, eventType)),
+    );
     await writeSources(
         writer,
-        MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
-        stable.filter((s) => s.id !== sourceId),
+        IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+        current.filter((s) => s.id !== sourceId),
     );
-    if (unstable.length > 0) {
-        await writeSources(
-            writer,
-            MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
-            unstable.filter((s) => s.id !== sourceId),
-        );
-    }
     return readDiscoverySources(writer);
 }
 
@@ -171,6 +190,42 @@ function parseIndex(sourceUrl: string, raw: unknown): DiscoveryIndex {
             return out;
         }),
     };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Fill optional pack metadata from an index entry without overwriting the pack's own values. */
+export function mergeDiscoveryPackMetadata(payload: unknown, entry: DiscoveryIndexEntry): unknown {
+    if (!isRecord(payload)) return payload;
+    const packValue = payload.pack;
+    const isLegacyEnvelope = payload.version === 1 && isRecord(packValue) && "images" in packValue;
+    if (isLegacyEnvelope && isRecord(packValue)) {
+        if (isRecord(packValue.pack)) {
+            const metadata = { ...packValue.pack };
+            if (metadata.display_name === undefined && entry.displayName !== undefined) {
+                metadata.display_name = entry.displayName;
+            }
+            if (metadata.avatar_url === undefined && entry.avatarUrl !== undefined) {
+                metadata.avatar_url = entry.avatarUrl;
+            }
+            if (metadata.attribution === undefined && entry.attribution !== undefined) {
+                metadata.attribution = entry.attribution;
+            }
+            return { ...payload, pack: { ...packValue, pack: metadata } };
+        }
+        const pack = { ...packValue };
+        if (pack.displayName === undefined && entry.displayName !== undefined) pack.displayName = entry.displayName;
+        if (pack.avatarUrl === undefined && entry.avatarUrl !== undefined) pack.avatarUrl = entry.avatarUrl;
+        if (pack.attribution === undefined && entry.attribution !== undefined) pack.attribution = entry.attribution;
+        return { ...payload, pack };
+    }
+    const pack = isRecord(payload.pack) ? { ...payload.pack } : {};
+    if (pack.display_name === undefined && entry.displayName !== undefined) pack.display_name = entry.displayName;
+    if (pack.avatar_url === undefined && entry.avatarUrl !== undefined) pack.avatar_url = entry.avatarUrl;
+    if (pack.attribution === undefined && entry.attribution !== undefined) pack.attribution = entry.attribution;
+    return { ...payload, pack };
 }
 
 /**

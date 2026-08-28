@@ -8,7 +8,12 @@ Please see LICENSE files in the repository root for full details.
 import React, { useState } from "react";
 
 import type { UseImagePacksResult } from "./useImagePacks.ts";
-import { fetchDiscoveryPack, resolveDiscoverySource, type DiscoveryFetcher } from "./discovery.ts";
+import {
+    fetchDiscoveryPack,
+    mergeDiscoveryPackMetadata,
+    resolveDiscoverySource,
+    type DiscoveryFetcher,
+} from "./discovery.ts";
 import type { DiscoveryIndex, DiscoveryIndexEntry, DiscoverySource } from "./types.ts";
 
 interface DiscoveryPanelProps {
@@ -46,6 +51,7 @@ export function DiscoveryPanel(props: DiscoveryPanelProps): React.ReactElement {
                     <li key={source.id} data-testid={`source-${source.id}`}>
                         <span>{source.displayName ?? source.url}</span>
                         <button
+                            type="button"
                             onClick={async () => {
                                 setBrowseError(null);
                                 try {
@@ -58,7 +64,9 @@ export function DiscoveryPanel(props: DiscoveryPanelProps): React.ReactElement {
                         >
                             Browse
                         </button>
-                        <button onClick={() => api.removeSource(source.id)}>Remove</button>
+                        <button type="button" onClick={() => api.removeSource(source.id)}>
+                            Remove
+                        </button>
                     </li>
                 ))}
             </ul>
@@ -95,6 +103,7 @@ function NewSourceForm(props: { api: UseImagePacksResult }): React.ReactElement 
                 onChange={(e) => setDraft({ ...draft, url: e.target.value })}
             />
             <button
+                type="button"
                 onClick={async () => {
                     if (!draft.id.trim() || !draft.url.trim()) return;
                     await api.addSource(draft);
@@ -131,7 +140,9 @@ function BrowseResult(props: {
                     />
                 ))}
             </ul>
-            <button onClick={onClose}>Close</button>
+            <button type="button" onClick={onClose}>
+                Close
+            </button>
         </div>
     );
 }
@@ -148,10 +159,16 @@ function BrowseItem(props: {
         <li data-testid={`discovery-entry-${entry.id}`}>
             <span>{entry.displayName ?? entry.id}</span>
             <button
+                type="button"
                 onClick={async () => {
                     try {
                         const pack = await fetchDiscoveryPack(entry, fetcher);
-                        await api.importPack(pack, installRoomId, entry.id);
+                        await api.importPack(
+                            mergeDiscoveryPackMetadata(pack, entry),
+                            installRoomId,
+                            entry.id,
+                            entry.displayName,
+                        );
                     } catch (e) {
                         onError(e instanceof Error ? e.message : String(e));
                     }

@@ -14,6 +14,7 @@ import { mkEvent, mkStubRoom, mockStateEventImplementation } from "test-utils";
 import {
     createRoomImagePack,
     decorateCustomEmotes,
+    deleteUserImagePack,
     deleteRoomImagePack,
     disableGlobalPack,
     enableGlobalPack,
@@ -25,6 +26,7 @@ import {
     LEGACY_IMAGE_PACK_EVENT_TYPE,
     LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
     LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
+    ROOM_IMAGE_PACK_ORDER_EVENT_TYPE,
     prepareCustomEmotesForEditing,
     redactRoomImagePack,
     removeRoomPackEmote,
@@ -32,6 +34,7 @@ import {
     resolveCustomEmoteToken,
     reorderRoomImagePacks,
     updateRoomImagePackMetadata,
+    replaceUserImagePack,
     upsertRoomPackEmote,
     upsertUserImagePack,
     upsertUserPackEmote,
@@ -260,16 +263,14 @@ describe("custom emotes", () => {
 });
 
 describe("image pack writer helpers", () => {
-    function clientWithRoom(room: Room, initialAccountData: Record<string, Record<string, unknown>> = {}): MatrixClient {
+    function clientWithRoom(
+        room: Room,
+        initialAccountData: Record<string, Record<string, unknown>> = {},
+    ): MatrixClient {
         const accountData: Record<string, Record<string, unknown>> = { ...initialAccountData };
         const stateEventsByKey: Record<string, Record<string, MatrixEvent>> = {};
         const stateLists: Record<string, MatrixEvent[]> = {};
-        const setStateEvent = (
-            roomId: string,
-            type: string,
-            content: unknown,
-            stateKey: string,
-        ): unknown => {
+        const setStateEvent = (roomId: string, type: string, content: unknown, stateKey: string): unknown => {
             const list = (stateLists[type] = stateLists[type] ?? []);
             const event = mkEvent({
                 event: true,
@@ -319,7 +320,7 @@ describe("image pack writer helpers", () => {
         return client;
     }
 
-    it("creates a new room pack with emoticon usage", async () => {
+    it("creates a new room pack without inventing usage tags", async () => {
         const room = mkStubRoom("!r:example.org", "R");
         const client = clientWithRoom(room);
         await createRoomImagePack(client, room.roomId, "k", {
@@ -331,7 +332,32 @@ describe("image pack writer helpers", () => {
             IMAGE_PACK_EVENT_TYPE,
             {
                 images: { wave: { url: "mxc://e/wave" } },
-                pack: { display_name: "P", usage: ["emoticon"] },
+                pack: { display_name: "P" },
+            },
+            "k",
+        );
+    });
+
+    it("replaces stale images and preserves an explicit empty usage list", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        setStateEvents(room, [
+            packEvent(room.roomId, "k", {
+                pack: { display_name: "Old", usage: ["emoticon"] },
+                images: { old: { url: "mxc://e/old" } },
+            }),
+        ]);
+        const client = clientWithRoom(room);
+        await createRoomImagePack(client, room.roomId, "k", {
+            displayName: "New",
+            usage: [],
+            images: { fresh: { shortcode: "fresh", url: "mxc://e/fresh" } },
+        });
+        expect(client.sendStateEvent).toHaveBeenLastCalledWith(
+            room.roomId,
+            IMAGE_PACK_EVENT_TYPE,
+            {
+                pack: { display_name: "New", usage: [] },
+                images: { fresh: { url: "mxc://e/fresh" } },
             },
             "k",
         );
@@ -409,29 +435,25 @@ describe("image pack writer helpers", () => {
     it("throws on update when the pack does not exist", async () => {
         const room = mkStubRoom("!r:example.org", "R");
         const client = clientWithRoom(room);
-        await expect(
-            updateRoomImagePackMetadata(client, room.roomId, "missing", { displayName: "X" }),
-        ).rejects.toThrow(/does not exist/);
+        await expect(updateRoomImagePackMetadata(client, room.roomId, "missing", { displayName: "X" })).rejects.toThrow(
+            /does not exist/,
+        );
     });
 
-    it("writes the order marker via reorderRoomImagePacks", async () => {
+    it("stores room ordering in private account data", async () => {
         const room = mkStubRoom("!r:example.org", "R");
         const client = clientWithRoom(room);
         await reorderRoomImagePacks(client, room.roomId, ["a", "b", "c"]);
-        expect(client.sendStateEvent).toHaveBeenCalledWith(
-            room.roomId,
-            IMAGE_PACK_EVENT_TYPE,
-            { stateKeys: ["a", "b", "c"] },
-            "_order",
-        );
+        expect(client.setAccountData).toHaveBeenCalledWith(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE, {
+            rooms: { [room.roomId]: ["a", "b", "c"] },
+        });
     });
 
     it("reads back the order marker via getRoomImagePackOrder", async () => {
         const room = mkStubRoom("!r:example.org", "R");
-        setStateEvents(room, [
-            packEvent(room.roomId, "_order", { stateKeys: ["a", "b"] }),
-        ]);
-        const client = clientWithRoom(room);
+        const client = clientWithRoom(room, {
+            [ROOM_IMAGE_PACK_ORDER_EVENT_TYPE]: { rooms: { [room.roomId]: ["a", "b"] } },
+        });
         expect(getRoomImagePackOrder(client, room.roomId)).toEqual({ stateKeys: ["a", "b"] });
     });
 
@@ -463,6 +485,19 @@ describe("image pack writer helpers", () => {
         );
     });
 
+    it("redacts an existing room pack instead of leaving a ghost state event", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        setStateEvents(room, [
+            packEvent(room.roomId, "k", {
+                images: { wave: { url: "mxc://e/wave" } },
+            }),
+        ]);
+        const client = clientWithRoom(room);
+        await deleteRoomImagePack(client, room.roomId, "k");
+        expect(client.redactEvent).toHaveBeenCalled();
+        expect(client.sendStateEvent).not.toHaveBeenCalled();
+    });
+
     it("enables and disables global pack references via stable and legacy account data", async () => {
         const room = mkStubRoom("!r:example.org", "R");
         const client = clientWithRoom(room);
@@ -486,13 +521,29 @@ describe("image pack writer helpers", () => {
             displayName: "Mine",
             images: { wave: { shortcode: "wave", url: "mxc://e/wave" } },
         });
-        expect(client.setAccountData).toHaveBeenCalledWith(
-            LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
-            {
-                pack: { display_name: "Mine", usage: ["emoticon"] },
-                images: { wave: { url: "mxc://e/wave" } },
+        expect(client.setAccountData).toHaveBeenCalledWith(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, {
+            pack: { display_name: "Mine" },
+            images: { wave: { url: "mxc://e/wave" } },
+        });
+    });
+
+    it("replaces the complete personal pack without retaining stale images", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room, {
+            [LEGACY_USER_IMAGE_PACK_EVENT_TYPE]: {
+                pack: { display_name: "Old", usage: ["emoticon"] },
+                images: { old: { url: "mxc://e/old" } },
             },
-        );
+        });
+        await replaceUserImagePack(client, {
+            displayName: "New",
+            images: { fresh: { shortcode: "fresh", url: "mxc://e/fresh" } },
+            usage: [],
+        });
+        expect(client.setAccountData).toHaveBeenLastCalledWith(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, {
+            pack: { display_name: "New", usage: [] },
+            images: { fresh: { url: "mxc://e/fresh" } },
+        });
     });
 
     it("adds and removes emotes on the user pack", async () => {
@@ -516,6 +567,13 @@ describe("image pack writer helpers", () => {
             pack: { display_name: "Mine", usage: ["emoticon"] },
             images: { yes: { url: "mxc://e/yes" } },
         });
+    });
+
+    it("clears the personal pack account data when it is deleted", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room);
+        await deleteUserImagePack(client);
+        expect(client.setAccountData).toHaveBeenCalledWith(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, {});
     });
 
     it("reads back the user pack as if it were a resolved pack", () => {

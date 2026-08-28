@@ -11,7 +11,11 @@ Please see LICENSE files in the repository root for full details.
 import React from "react";
 import { RoomEvent, type Room, RoomStateEvent, type MatrixEvent, EventType } from "matrix-js-sdk/src/matrix";
 import ImagePackIcon from "@vector-im/compound-design-tokens/assets/web/icons/image";
-import { ImagePacksSettings, useImagePacks } from "@element-hq/element-web-module-image-packs";
+import {
+    ImagePacksSettings,
+    useImagePacks,
+    type UseImagePacksOptions,
+} from "@element-hq/element-web-module-image-packs";
 import { createWritersFromClient } from "../../../custom-emotes";
 import {
     AdminIcon,
@@ -49,6 +53,7 @@ import { SDKContext } from "../../../contexts/SDKContext";
 import { type SDKContextClass } from "../../../contexts/SDKContextClass";
 import { RoomSettingsTab } from "./RoomSettingsDialog-tab.ts";
 import SdkConfig from "../../../SdkConfig";
+import { ModuleApi } from "../../../modules/Api";
 
 interface IProps {
     roomId: string;
@@ -69,7 +74,7 @@ interface IState {
  */
 function ImagePacksRoomSettingsTab({ room }: { room: Room }): React.ReactElement {
     const cli = MatrixClientPeg.safeGet();
-    const hook = useImagePacks({
+    const options: UseImagePacksOptions = {
         client: {
             getUserId: () => cli.getUserId(),
             getRoom: (id: string) => cli.getRoom(id),
@@ -77,13 +82,28 @@ function ImagePacksRoomSettingsTab({ room }: { room: Room }): React.ReactElement
                 const ev = cli.getAccountData(type as never);
                 return ev ? { getContent: () => ev.getContent() } : null;
             },
-            setAccountData: (type: string, content: unknown) =>
-                cli.setAccountData(type as never, content as never),
+            setAccountData: (type: string, content: unknown) => cli.setAccountData(type as never, content as never),
         },
         writers: createWritersFromClient(cli),
         room,
-    });
-    return <ImagePacksSettings api={hook} roomId={room.roomId} />;
+    };
+    const mount = ModuleApi.instance.customisations.imagePacksMount;
+    return mount ? (
+        <>{mount({ ...options, roomId: room.roomId })}</>
+    ) : (
+        <DirectImagePacksRoomSettings options={options} roomId={room.roomId} />
+    );
+}
+
+function DirectImagePacksRoomSettings({
+    options,
+    roomId,
+}: {
+    options: UseImagePacksOptions;
+    roomId: string;
+}): React.ReactElement {
+    const hook = useImagePacks(options);
+    return <ImagePacksSettings api={hook} roomId={roomId} />;
 }
 
 class RoomSettingsDialog extends React.Component<IProps, IState> {

@@ -18,10 +18,20 @@ interface PackListPanelProps {
     hideUserScope?: boolean;
     /** Show controls for global enable/disable. */
     showGlobalToggle?: boolean;
+    /** Limit the list to personal/global references. */
+    onlyUserScope?: boolean;
+    /** Show the room state-key creation form. */
+    allowCreateRoomPack?: boolean;
+    /** Show the personal account-data creation form. */
+    allowCreateUserPack?: boolean;
 }
 
 function isValidShortcode(value: string): boolean {
     return /^[A-Za-z0-9_-]{1,100}$/.test(value);
+}
+
+function isValidStateKey(value: string): boolean {
+    return isValidShortcode(value) && value !== "_order";
 }
 
 function isValidMxc(value: string): boolean {
@@ -29,9 +39,18 @@ function isValidMxc(value: string): boolean {
 }
 
 export function PackListPanel(props: PackListPanelProps): React.ReactElement {
-    const { api, restrictToRoomId, hideUserScope, showGlobalToggle } = props;
+    const {
+        api,
+        restrictToRoomId,
+        hideUserScope,
+        showGlobalToggle,
+        onlyUserScope,
+        allowCreateRoomPack,
+        allowCreateUserPack,
+    } = props;
     const visible = api.packs.filter((pack) => {
         if (hideUserScope && pack.scope === "user") return false;
+        if (onlyUserScope && pack.scope !== "user") return false;
         if (restrictToRoomId && pack.roomId !== restrictToRoomId) return false;
         return true;
     });
@@ -55,7 +74,8 @@ export function PackListPanel(props: PackListPanelProps): React.ReactElement {
                     />
                 ))
             )}
-            <NewPackCard api={api} restrictToRoomId={restrictToRoomId} />
+            {allowCreateRoomPack ? <NewPackCard api={api} restrictToRoomId={restrictToRoomId} /> : null}
+            {allowCreateUserPack ? <NewUserPackCard api={api} /> : null}
         </div>
     );
 }
@@ -81,7 +101,8 @@ function PackCard(props: {
             return;
         }
         try {
-            await api.addRoomEmote(pack.roomId, pack.stateKey, newEmote);
+            if (pack.kind === "personal") await api.addUserEmote(newEmote);
+            else await api.addRoomEmote(pack.roomId, pack.stateKey, newEmote);
             setNewEmote({ shortcode: "", url: "" });
         } catch {
             // error already exposed via api.error
@@ -89,36 +110,66 @@ function PackCard(props: {
     };
 
     return (
-        <div className="mx_ImagePacksPanel_pack" data-testid={`pack-${pack.stateKey}`}>
+        <div
+            className="mx_ImagePacksPanel_pack"
+            data-testid={pack.kind === "personal" ? "pack-personal" : `pack-${pack.roomId}-${pack.stateKey}`}
+        >
             <div className="mx_ImagePacksPanel_packHeader">
                 {editing ? (
                     <PackRenameForm
-                        api={api}
-                        roomId={pack.roomId}
-                        stateKey={pack.stateKey}
                         initial={pack.displayName}
+                        onSave={async (displayName) => {
+                            if (pack.kind === "personal") {
+                                await api.setUserPack({ ...pack.pack, displayName });
+                            } else {
+                                await api.renameRoomPack(pack.roomId, pack.stateKey, displayName);
+                            }
+                        }}
                         onDone={() => setEditing(false)}
                     />
                 ) : (
                     <h4>
-                        {pack.displayName} <small>({pack.scope})</small>
+                        {pack.displayName} <small>({pack.kind})</small>
                     </h4>
                 )}
                 <div className="mx_ImagePacksPanel_packActions">
-                    {!editing ? <button onClick={() => setEditing(true)}>Rename</button> : null}
-                    {showGlobalToggle ? (
+                    {!editing ? (
+                        <button type="button" onClick={() => setEditing(true)}>
+                            Rename
+                        </button>
+                    ) : null}
+                    {showGlobalToggle && pack.kind !== "personal" ? (
                         <button
+                            type="button"
                             onClick={() =>
-                                pack.scope === "user"
+                                pack.kind === "global"
                                     ? api.disablePackGlobally(pack.roomId, pack.stateKey)
                                     : api.enablePackGlobally(pack.roomId, pack.stateKey)
                             }
                         >
-                            {pack.scope === "user" ? "Disable globally" : "Enable globally"}
+                            {pack.kind === "global" ? "Disable globally" : "Enable globally"}
                         </button>
                     ) : null}
-                    <button onClick={() => api.deleteRoomPack(pack.roomId, pack.stateKey)}>Delete</button>
-                    <button onClick={() => downloadJson(api.exportPack(pack.pack), `${pack.stateKey}.json`)}>
+                    {pack.kind === "personal" ? (
+                        <button type="button" onClick={() => api.deleteUserPack()}>
+                            Delete
+                        </button>
+                    ) : pack.kind === "room" ? (
+                        <button
+                            type="button"
+                            onClick={() =>
+                                pack.eventId
+                                    ? api.redactRoomPack(pack.roomId, pack.eventId)
+                                    : api.deleteRoomPack(pack.roomId, pack.stateKey)
+                            }
+                        >
+                            Delete
+                        </button>
+                    ) : null}
+                    <button
+                        type="button"
+                        onClick={() => downloadJson(api.exportPack(pack.pack), `${pack.stateKey}.json`)}
+                    >
                         Export
                     </button>
                 </div>
@@ -128,11 +179,12 @@ function PackCard(props: {
                 onEdit={async (shortcode, body) => {
                     const image = pack.pack.images[shortcode];
                     if (!image) return;
-                    await api.editRoomEmote(pack.roomId, pack.stateKey, { ...image, body });
+                    if (pack.kind === "personal") await api.editUserEmote({ ...image, body });
+                    else await api.editRoomEmote(pack.roomId, pack.stateKey, { ...image, body });
                 }}
                 onRemove={async (shortcode) => {
-                    if (!window.confirm(`Remove :${shortcode}: from this pack?`)) return;
-                    await api.removeRoomEmote(pack.roomId, pack.stateKey, shortcode);
+                    if (pack.kind === "personal") await api.removeUserEmote(shortcode);
+                    else await api.removeRoomEmote(pack.roomId, pack.stateKey, shortcode);
                 }}
             />
             <div className="mx_ImagePacksPanel_emoteForm">
@@ -154,7 +206,9 @@ function PackCard(props: {
                     value={newEmote.body ?? ""}
                     onChange={(e) => setNewEmote({ ...newEmote, body: e.target.value })}
                 />
-                <button onClick={submitEmote}>Add emote</button>
+                <button type="button" onClick={submitEmote}>
+                    Add emote
+                </button>
                 {emoteError ? <span className="mx_ImagePacksPanel_error">{emoteError}</span> : null}
             </div>
         </div>
@@ -166,6 +220,8 @@ function EmoteGrid(props: {
     onEdit: (shortcode: string, body: string) => Promise<void>;
     onRemove: (shortcode: string) => Promise<void>;
 }): React.ReactElement {
+    const [editing, setEditing] = useState<string | null>(null);
+    const [editBody, setEditBody] = useState("");
     const entries = Object.entries(props.pack.images);
     if (entries.length === 0) return <div className="mx_ImagePacksPanel_emotesEmpty">No emotes in this pack yet.</div>;
     return (
@@ -174,15 +230,40 @@ function EmoteGrid(props: {
                 <li key={shortcode} className="mx_ImagePacksPanel_emote" data-testid={`emote-${shortcode}`}>
                     <code>:{shortcode}:</code>
                     <span>{image.body ?? ""}</span>
-                    <button
-                        onClick={() => {
-                            const next = window.prompt(`Edit body for :${shortcode}:`, image.body ?? "");
-                            if (next !== null) void props.onEdit(shortcode, next);
-                        }}
-                    >
-                        Edit
+                    {editing === shortcode ? (
+                        <>
+                            <input
+                                aria-label={`Body for ${shortcode}`}
+                                value={editBody}
+                                onChange={(event) => setEditBody(event.target.value)}
+                            />
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    await props.onEdit(shortcode, editBody);
+                                    setEditing(null);
+                                }}
+                            >
+                                Save
+                            </button>
+                            <button type="button" onClick={() => setEditing(null)}>
+                                Cancel
+                            </button>
+                        </>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setEditing(shortcode);
+                                setEditBody(image.body ?? "");
+                            }}
+                        >
+                            Edit
+                        </button>
+                    )}
+                    <button type="button" onClick={() => void props.onRemove(shortcode)}>
+                        Remove
                     </button>
-                    <button onClick={() => void props.onRemove(shortcode)}>Remove</button>
                 </li>
             ))}
         </ul>
@@ -190,20 +271,18 @@ function EmoteGrid(props: {
 }
 
 function PackRenameForm(props: {
-    api: UseImagePacksResult;
-    roomId: string;
-    stateKey: string;
     initial: string;
+    onSave: (displayName: string) => Promise<void>;
     onDone: () => void;
 }): React.ReactElement {
-    const { api, roomId, stateKey, initial, onDone } = props;
+    const { initial, onSave, onDone } = props;
     const [value, setValue] = useState(initial);
     return (
         <form
             onSubmit={async (e) => {
                 e.preventDefault();
                 if (!value.trim()) return;
-                await api.renameRoomPack(roomId, stateKey, value.trim());
+                await onSave(value.trim());
                 onDone();
             }}
         >
@@ -221,11 +300,13 @@ function NewPackCard(props: { api: UseImagePacksResult; restrictToRoomId?: strin
     const [stateKey, setStateKey] = useState("");
     const [displayName, setDisplayName] = useState("");
     const submit = async (): Promise<void> => {
-        if (!isValidShortcode(stateKey) || !displayName.trim()) return;
+        const roomId = restrictToRoomId ?? api.newPack.roomId;
+        if (!isValidStateKey(stateKey) || !displayName.trim() || !roomId) return;
         await api.createRoomPack({
-            roomId: restrictToRoomId ?? api.newPack.roomId,
+            roomId,
             stateKey,
             displayName,
+            usage: ["emoticon"],
             images: {},
         });
         setStateKey("");
@@ -246,7 +327,33 @@ function NewPackCard(props: { api: UseImagePacksResult; restrictToRoomId?: strin
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
             />
-            <button onClick={submit}>Create pack</button>
+            <button type="button" onClick={submit}>
+                Create pack
+            </button>
+        </div>
+    );
+}
+
+function NewUserPackCard(props: { api: UseImagePacksResult }): React.ReactElement {
+    const { api } = props;
+    const [displayName, setDisplayName] = useState("");
+    const submit = async (): Promise<void> => {
+        if (!displayName.trim()) return;
+        await api.setUserPack({ displayName: displayName.trim(), usage: ["emoticon"], images: {} });
+        setDisplayName("");
+    };
+    return (
+        <div className="mx_ImagePacksPanel_newPack" data-testid="new-user-pack-form">
+            <h4>New personal pack</h4>
+            <input
+                aria-label="Personal pack display name"
+                placeholder="Display name"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+            />
+            <button type="button" onClick={submit}>
+                Create pack
+            </button>
         </div>
     );
 }

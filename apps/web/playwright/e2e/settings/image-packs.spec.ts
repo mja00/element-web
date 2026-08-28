@@ -10,7 +10,6 @@ import { test, expect } from "../../element-web-test";
 test.describe("Image packs settings", () => {
     const shortcode = "wave";
     const packName = "Waves pack";
-    const packStateKey = "waves";
 
     test.use({
         displayName: "Bob",
@@ -30,13 +29,12 @@ test.describe("Image packs settings", () => {
         await expect(settings.getByRole("heading", { name: "Image packs" })).toBeVisible();
 
         // Create the personal pack via the module's UI.
-        const newPackForm = page.getByTestId("new-pack-form");
-        await newPackForm.getByLabel("State key").fill(packStateKey);
-        await newPackForm.getByLabel("Display name").fill(packName);
+        const newPackForm = page.getByTestId("new-user-pack-form");
+        await newPackForm.getByLabel("Personal pack display name").fill(packName);
         await newPackForm.getByRole("button", { name: "Create pack" }).click();
 
         // The pack card should now appear.
-        const packCard = page.getByTestId(`pack-${packStateKey}`);
+        const packCard = page.getByTestId("pack-personal");
         await expect(packCard).toBeVisible();
         await expect(packCard.getByRole("heading")).toContainText(packName);
 

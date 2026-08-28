@@ -37,8 +37,9 @@ storybook-static
 
 .nx/cache
 .nx/workspace-data
+
 .pnpm-store
 
-# Goal-mode scratch files
-/.goal.md
+# vitepress
+/docs/.vitepress/dist
 /docs/.vitepress/cache

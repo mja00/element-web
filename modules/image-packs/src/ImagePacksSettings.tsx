@@ -29,23 +29,21 @@ export function ImagePacksSettings(props: ImagePacksSettingsProps): React.ReactE
     const { api, roomId, hideUserSection, hideDiscovery } = props;
     return (
         <div data-testid="image-packs-tab" className="mx_ImagePacksTab">
-            {hideUserSection ? null : (
+            {!hideUserSection ? (
                 <section>
                     <h3>Personal &amp; global packs</h3>
-                    <PackListPanel api={api} showGlobalToggle />
+                    <PackListPanel api={api} showGlobalToggle onlyUserScope allowCreateUserPack />
                 </section>
-            )}
-            <section>
-                <h3>{roomId ? "Room packs" : "All packs"}</h3>
-                <PackListPanel
-                    api={api}
-                    restrictToRoomId={roomId}
-                    hideUserScope={Boolean(roomId)}
-                />
-            </section>
+            ) : null}
+            {roomId ? (
+                <section>
+                    <h3>Room packs</h3>
+                    <PackListPanel api={api} restrictToRoomId={roomId} hideUserScope allowCreateRoomPack />
+                </section>
+            ) : null}
             {hideDiscovery || !roomId ? null : (
                 <section>
-                    <h3>Discovery sources (MSC2654)</h3>
+                    <h3>Image-pack discovery sources</h3>
                     <DiscoveryPanel api={api} installRoomId={roomId} />
                 </section>
             )}

@@ -11,7 +11,7 @@ packages:
     - "packages/*"
     - "modules"
     - "modules/*"
-    - "modules/image-packs"
+
 catalog:
     # typescript
     "typescript": 7.0.2

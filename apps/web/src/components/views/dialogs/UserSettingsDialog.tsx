@@ -25,8 +25,13 @@ import BlockIcon from "@vector-im/compound-design-tokens/assets/web/icons/block"
 import HelpIcon from "@vector-im/compound-design-tokens/assets/web/icons/help";
 import ImagePackIcon from "@vector-im/compound-design-tokens/assets/web/icons/image";
 import { ToastContext, useActiveToast } from "@element-hq/web-shared-components";
-import { ImagePacksSettings, useImagePacks } from "@element-hq/element-web-module-image-packs";
+import {
+    ImagePacksSettings,
+    useImagePacks,
+    type UseImagePacksOptions,
+} from "@element-hq/element-web-module-image-packs";
 import { createWritersFromClient } from "../../../custom-emotes";
+import { ModuleApi } from "../../../modules/Api";
 import { _t, _td } from "../../../languageHandler";
 import SettingsTab from "../settings/tabs/SettingsTab";
 import TabbedView, { Tab, useActiveTabWithDefault } from "../../structures/TabbedView";
@@ -116,7 +121,7 @@ function ImagePacksUserSettingsTab({ sdkContext }: { sdkContext: SDKContextClass
     // Tab registration in `getTabs` only renders this when a client is
     // available, so we can safely assert the client here.
     const cli = sdkContext.client!;
-    const hook = useImagePacks({
+    const options: UseImagePacksOptions = {
         client: {
             getUserId: () => cli.getUserId(),
             getRoom: (id: string) => cli.getRoom(id),
@@ -124,16 +129,19 @@ function ImagePacksUserSettingsTab({ sdkContext }: { sdkContext: SDKContextClass
                 const ev = cli.getAccountData(type as never);
                 return ev ? { getContent: () => ev.getContent() } : null;
             },
-            setAccountData: (type: string, content: unknown) =>
-                cli.setAccountData(type as never, content as never),
+            setAccountData: (type: string, content: unknown) => cli.setAccountData(type as never, content as never),
         },
         writers: createWritersFromClient(cli),
-    });
+    };
+    const mount = ModuleApi.instance.customisations.imagePacksMount;
     return (
-        <SettingsTab>
-            <ImagePacksSettings api={hook} />
-        </SettingsTab>
+        <SettingsTab>{mount ? <>{mount(options)}</> : <DirectImagePacksUserSettings options={options} />}</SettingsTab>
     );
+}
+
+function DirectImagePacksUserSettings({ options }: { options: UseImagePacksOptions }): React.ReactElement {
+    const hook = useImagePacks(options);
+    return <ImagePacksSettings api={hook} />;
 }
 
 export default function UserSettingsDialog(props: IProps): JSX.Element {

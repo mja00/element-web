@@ -13,6 +13,7 @@ import {
     LEGACY_IMAGE_PACK_EVENT_TYPE,
     LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
     LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
+    ROOM_IMAGE_PACK_ORDER_EVENT_TYPE,
     resolveEnabledPacks,
 } from "./resolver.ts";
 import type { ResolverClient, ResolverRoom } from "./resolver.ts";
@@ -99,6 +100,8 @@ describe("resolveEnabledPacks", () => {
         const out = resolveEnabledPacks(client, room, [space]);
         expect(out.map((entry) => entry.displayName)).toEqual(["Global", "Personal", "Room", "Space"]);
         expect(out.map((entry) => entry.scope)).toEqual(["user", "user", "room", "space"]);
+        expect(out.map((entry) => entry.kind)).toEqual(["global", "personal", "room", "space"]);
+        expect(out[1]?.pack.images.hi?.url).toBe("mxc://e/me-hi");
     });
 
     it("deduplicates packs referenced from both stable and legacy account-data", () => {
@@ -113,11 +116,9 @@ describe("resolveEnabledPacks", () => {
             [IMAGE_PACK_ROOMS_EVENT_TYPE]: makeStateEvent(IMAGE_PACK_ROOMS_EVENT_TYPE, "", {
                 rooms: { [globalRoom.roomId]: { g: {} } },
             }),
-            [LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE]: makeStateEvent(
-                LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
-                "",
-                { rooms: { [globalRoom.roomId]: { g: {} } } },
-            ),
+            [LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE]: makeStateEvent(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, "", {
+                rooms: { [globalRoom.roomId]: { g: {} } },
+            }),
         });
 
         const out = resolveEnabledPacks(client, room, []);
@@ -145,5 +146,27 @@ describe("resolveEnabledPacks", () => {
         const client = makeClient([room], {});
         const out = resolveEnabledPacks(client, room, []);
         expect(out.map((entry) => entry.displayName)).toEqual(["Legacy"]);
+    });
+
+    it("does not crash when the room state lookup returns an empty list for a state key", () => {
+        const room = {
+            roomId: "!r:example.org",
+            currentState: { getStateEvents: () => [] },
+        } satisfies ResolverRoom;
+        const client = makeClient([room], {});
+        expect(resolveEnabledPacks(client, room)).toEqual([]);
+    });
+
+    it("applies private per-room ordering without publishing a state event", () => {
+        const room = makeRoom("!r:example.org", [
+            makeStateEvent(IMAGE_PACK_EVENT_TYPE, "a", { images: { a: { url: "mxc://e/a" } } }),
+            makeStateEvent(IMAGE_PACK_EVENT_TYPE, "b", { images: { b: { url: "mxc://e/b" } } }),
+        ]);
+        const client = makeClient([room], {
+            [ROOM_IMAGE_PACK_ORDER_EVENT_TYPE]: makeStateEvent(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE, "", {
+                rooms: { [room.roomId]: ["b", "a"] },
+            }),
+        });
+        expect(resolveEnabledPacks(client, room).map((pack) => pack.stateKey)).toEqual(["b", "a"]);
     });
 });

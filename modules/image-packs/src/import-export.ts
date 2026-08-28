@@ -35,7 +35,7 @@ const wireImage = z.object({
 });
 
 const wirePackMeta = z.object({
-    display_name: z.string().min(1, { message: "Pack `display_name` is required." }),
+    display_name: z.string().optional(),
     avatar_url: mxc.optional(),
     attribution: z.string().optional(),
     usage: z.array(z.string()).optional(),
@@ -43,11 +43,11 @@ const wirePackMeta = z.object({
 
 const wirePackContent = z.object({
     images: z.record(shortcode, wireImage),
-    pack: wirePackMeta,
+    pack: wirePackMeta.optional(),
 });
 
 const camelPackContent = z.object({
-    displayName: z.string().min(1, { message: "Pack `displayName` is required." }),
+    displayName: z.string().optional(),
     avatarUrl: mxc.optional(),
     attribution: z.string().optional(),
     usage: z.array(z.string()).optional(),
@@ -62,112 +62,103 @@ const camelPackContent = z.object({
     ),
 });
 
-const envelopeSchema = z.object({
-    version: z.literal(PACK_IMPORT_SCHEMA_VERSION),
-    pack: z.union([wirePackContent, camelPackContent]),
-});
-
-function fromWireContent(value: z.infer<typeof wirePackContent>): ImagePackDefinition {
+function fromWireContent(value: z.infer<typeof wirePackContent>, fallbackDisplayName = ""): ImagePackDefinition {
     const def: ImagePackDefinition = {
-        displayName: value.pack.display_name.trim(),
-        images: Object.fromEntries(
-            Object.entries(value.images).map(([k, v]) => [k, toEmote(k, v)]),
-        ),
+        displayName: value.pack?.display_name?.trim() || fallbackDisplayName,
+        images: Object.fromEntries(Object.entries(value.images).map(([k, v]) => [k, toEmote(k, v)])),
     };
-    if (value.pack.avatar_url) def.avatarUrl = value.pack.avatar_url;
-    if (value.pack.attribution) def.attribution = value.pack.attribution;
-    if (value.pack.usage) def.usage = value.pack.usage;
+    if (value.pack?.avatar_url) def.avatarUrl = value.pack.avatar_url;
+    if (value.pack?.attribution) def.attribution = value.pack.attribution;
+    if (value.pack?.usage !== undefined) def.usage = value.pack.usage;
     return def;
 }
 
-function fromCamelContent(value: z.infer<typeof camelPackContent>): ImagePackDefinition {
+function fromCamelContent(value: z.infer<typeof camelPackContent>, fallbackDisplayName = ""): ImagePackDefinition {
     const def: ImagePackDefinition = {
-        displayName: value.displayName.trim(),
-        images: Object.fromEntries(
-            Object.entries(value.images).map(([k, v]) => [k, toEmote(k, v)]),
-        ),
+        displayName: value.displayName?.trim() || fallbackDisplayName,
+        images: Object.fromEntries(Object.entries(value.images).map(([k, v]) => [k, toEmote(k, v)])),
     };
     if (value.avatarUrl) def.avatarUrl = value.avatarUrl;
     if (value.attribution) def.attribution = value.attribution;
-    if (value.usage) def.usage = value.usage;
+    if (value.usage !== undefined) def.usage = value.usage;
     return def;
 }
 
 function toEmote(key: string, value: { url: string; body?: string; info?: Record<string, unknown> }): EmoteDefinition {
     const out: EmoteDefinition = { shortcode: key, url: value.url };
-    if (value.body) out.body = value.body;
+    if (value.body !== undefined) out.body = value.body;
     if (value.info) out.info = value.info;
     return out;
 }
 
 /**
  * Parse and validate a pack JSON payload produced by {@link exportPackJson}.
- * Accepts three shapes:
- *   1. `{ version: 1, pack: ImagePackDefinition }` (the form export produces)
- *   2. `{ version: 1, pack: { images, pack: { display_name, ... } } }` (the wire form)
- *   3. Bare `{ images, pack: { display_name, ... } }` (raw MSC2545 content)
+ * Accepts raw MSC2545 content and the former versioned module envelopes.
  *
  * Throws {@link PackImportError} if the input does not match the expected
  * schema. The function is intentionally strict — clients should not silently
  * accept malformed packs.
  */
-export function parsePackJson(input: unknown): ImagePackDefinition {
+export function parsePackJson(input: unknown, fallbackDisplayName = ""): ImagePackDefinition {
     if (typeof input !== "object" || input === null) {
         throw new PackImportError("Pack JSON must be an object.");
     }
     const obj = input as Record<string, unknown>;
 
     if (obj.version === PACK_IMPORT_SCHEMA_VERSION && "pack" in obj) {
-        const parsed = envelopeSchema.safeParse(obj);
+        if (typeof obj.pack !== "object" || obj.pack === null) {
+            throw new PackImportError("Invalid pack JSON.");
+        }
+        if ("displayName" in obj.pack) {
+            const parsed = z
+                .object({ version: z.literal(PACK_IMPORT_SCHEMA_VERSION), pack: camelPackContent })
+                .safeParse(obj);
+            if (!parsed.success) throw new PackImportError(parsed.error.issues[0]?.message ?? "Invalid pack JSON.");
+            return fromCamelContent(parsed.data.pack, fallbackDisplayName);
+        }
+        const parsed = z
+            .object({ version: z.literal(PACK_IMPORT_SCHEMA_VERSION), pack: wirePackContent })
+            .safeParse(obj);
         if (!parsed.success) throw new PackImportError(parsed.error.issues[0]?.message ?? "Invalid pack JSON.");
-        const inner = parsed.data.pack;
-        return "displayName" in inner ? fromCamelContent(inner) : fromWireContent(inner);
+        return fromWireContent(parsed.data.pack, fallbackDisplayName);
     }
-    if ("images" in obj && "pack" in obj) {
-        const parsed = wirePackContent.safeParse(obj);
-        if (!parsed.success) throw new PackImportError(parsed.error.issues[0]?.message ?? "Invalid pack JSON.");
-        return fromWireContent(parsed.data);
-    }
-    if ("images" in obj && "displayName" in obj) {
+    if ("displayName" in obj) {
         const parsed = camelPackContent.safeParse(obj);
         if (!parsed.success) throw new PackImportError(parsed.error.issues[0]?.message ?? "Invalid pack JSON.");
-        return fromCamelContent(parsed.data);
+        return fromCamelContent(parsed.data, fallbackDisplayName);
     }
-    throw new PackImportError("Pack JSON missing required `images` and `pack` keys.");
+    if ("images" in obj) {
+        const parsed = wirePackContent.safeParse(obj);
+        if (!parsed.success) throw new PackImportError(parsed.error.issues[0]?.message ?? "Invalid pack JSON.");
+        return fromWireContent(parsed.data, fallbackDisplayName);
+    }
+    throw new PackImportError("Pack JSON missing required `images` key.");
 }
 
 /**
- * Serialise a pack to the versioned envelope shape. The output round-trips
- * through {@link parsePackJson}.
+ * Serialise a pack to the raw MSC2545 wire shape. The output can be consumed
+ * directly by clients which do not know about this module's former envelope.
  */
 export function exportPackJson(pack: ImagePackDefinition): PackImportPayload {
-    if (!pack.displayName.trim()) {
-        throw new PackImportError("Cannot export a pack without a display name.");
-    }
-    const images: ImagePackDefinition["images"] = {};
+    const images: PackImportPayload["images"] = {};
     for (const [shortcode, image] of Object.entries(pack.images)) {
         if (!SHORTCODE_REGEX.test(shortcode)) {
-            throw new PackImportError(
-                `Invalid shortcode "${shortcode}". Must match ${SHORTCODE_REGEX.source}.`,
-            );
+            throw new PackImportError(`Invalid shortcode "${shortcode}". Must match ${SHORTCODE_REGEX.source}.`);
         }
         if (!MXC_REGEX.test(image.url)) {
             throw new PackImportError(`Invalid MXC URL "${image.url}".`);
         }
-        const emote: EmoteDefinition = { shortcode, url: image.url };
-        if (image.body) emote.body = image.body;
+        const emote: PackImportPayload["images"][string] = { url: image.url };
+        if (image.body !== undefined) emote.body = image.body;
         if (image.info) emote.info = image.info;
         images[shortcode] = emote;
     }
-    const out: PackImportPayload = {
-        version: PACK_IMPORT_SCHEMA_VERSION,
-        pack: {
-            displayName: pack.displayName.trim(),
-            images,
-            usage: pack.usage ?? ["emoticon"],
-        },
-    };
-    if (pack.avatarUrl) out.pack.avatarUrl = pack.avatarUrl;
-    if (pack.attribution) out.pack.attribution = pack.attribution;
+    const out: PackImportPayload = { images };
+    const metadata: NonNullable<PackImportPayload["pack"]> = {};
+    if (pack.displayName.trim()) metadata.display_name = pack.displayName.trim();
+    if (pack.avatarUrl !== undefined) metadata.avatar_url = pack.avatarUrl;
+    if (pack.attribution !== undefined) metadata.attribution = pack.attribution;
+    if (pack.usage !== undefined) metadata.usage = [...pack.usage];
+    if (Object.keys(metadata).length > 0) out.pack = metadata;
     return out;
 }

@@ -17,12 +17,8 @@ import { useImagePacks, type UseImagePacksOptions } from "./useImagePacks.ts";
  * bridge around its live `MatrixClient` and passes it via `UseImagePacksOptions`.
  */
 export interface ImagePacksMountCustomisations {
-    /**
-     * Called once at module load. The host supplies a `mount` function
-     * that returns the React element to render given resolved options
-     * (live client, writer bridge, optional room context).
-     */
-    imagePacksMount?: (mount: ImagePacksRenderer) => void;
+    /** Called once at module load so the host can render the settings UI. */
+    registerImagePacksMount?: (mount: ImagePacksRenderer) => void;
 }
 
 export type ImagePacksRenderer = (opts: UseImagePacksOptions & { roomId?: string }) => React.ReactNode;
@@ -35,8 +31,8 @@ class ImagePacksModule implements Module {
     public async load(): Promise<void> {
         const customisations = this.api.customisations as unknown as ImagePacksMountCustomisations;
 
-        if (typeof customisations.imagePacksMount === "function") {
-            customisations.imagePacksMount((opts) => {
+        if (typeof customisations.registerImagePacksMount === "function") {
+            customisations.registerImagePacksMount((opts) => {
                 const hook = useImagePacks(opts);
                 return <ImagePacksSettings api={hook} roomId={opts.roomId} />;
             });
@@ -56,6 +52,7 @@ export { resolveEnabledPacks } from "./resolver.ts";
 export {
     resolveDiscoverySource,
     fetchDiscoveryPack,
+    mergeDiscoveryPackMetadata,
     addDiscoverySource,
     removeDiscoverySource,
     readDiscoverySources,
@@ -70,11 +67,13 @@ export type {
     DiscoveryIndexEntry,
     PackImportPayload,
     ImagePackScope,
+    ImagePackKind,
 } from "./types.ts";
-export type {
-    PackWriters,
-    PackStoreClient,
-    CreateRoomPackInput,
-    RoomPackDraft,
-} from "./store.ts";
+export {
+    IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+    IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+    ROOM_IMAGE_PACK_ORDER_EVENT_TYPE,
+    LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY,
+} from "./types.ts";
+export type { PackWriters, PackStoreClient, CreateRoomPackInput, RoomPackDraft } from "./store.ts";
 export type { ResolverClient, ResolverRoom, ResolvedPackSummary } from "./resolver.ts";

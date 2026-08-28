@@ -15,6 +15,7 @@ import {
     addUserEmote,
     createRoomPack,
     deleteRoomPack,
+    deleteUserPack,
     disablePackGlobally,
     editRoomEmote,
     editUserEmote,
@@ -24,6 +25,7 @@ import {
     removeRoomEmote,
     removeSource,
     removeUserEmote,
+    redactRoomPack,
     renameRoomPack,
     reorderRoomPacks,
     setUserPack,
@@ -46,6 +48,8 @@ export interface ImagePackView {
     roomId: string;
     stateKey: string;
     scope: "user" | "room" | "space";
+    kind: "personal" | "global" | "room" | "space";
+    eventId?: string;
     displayName: string;
     pack: ImagePackDefinition;
 }
@@ -65,6 +69,7 @@ export interface UseImagePacksResult {
     createRoomPack: (input?: Partial<CreateRoomPackInput>) => Promise<void>;
     renameRoomPack: (roomId: string, stateKey: string, displayName: string) => Promise<void>;
     deleteRoomPack: (roomId: string, stateKey: string) => Promise<void>;
+    redactRoomPack: (roomId: string, eventId: string) => Promise<void>;
     enablePackGlobally: (roomId: string, stateKey: string) => Promise<void>;
     disablePackGlobally: (roomId: string, stateKey: string) => Promise<void>;
     reorderPacks: (orderedKeys: string[]) => Promise<void>;
@@ -75,7 +80,8 @@ export interface UseImagePacksResult {
     editUserEmote: (emote: EmoteDefinition) => Promise<void>;
     removeUserEmote: (shortcode: string) => Promise<void>;
     setUserPack: (pack: ImagePackDefinition) => Promise<void>;
-    importPack: (payload: unknown, roomId: string, stateKey: string) => Promise<void>;
+    deleteUserPack: () => Promise<void>;
+    importPack: (payload: unknown, roomId: string, stateKey: string, fallbackDisplayName?: string) => Promise<void>;
     addSource: (source: DiscoverySource) => Promise<DiscoverySource[]>;
     removeSource: (sourceId: string) => Promise<DiscoverySource[]>;
     exportPack: (pack: ImagePackDefinition) => string;
@@ -86,6 +92,8 @@ export function toView(summary: ResolvedPackSummary): ImagePackView {
         roomId: summary.roomId,
         stateKey: summary.stateKey,
         scope: summary.scope,
+        kind: summary.kind,
+        eventId: summary.eventId,
         displayName: summary.displayName,
         pack: summary.pack,
     };
@@ -102,7 +110,7 @@ const defaultSource = (): DiscoverySource => ({ id: "", url: "" });
 
 const emptyRoom = (): ResolverRoom => ({
     roomId: "",
-    currentState: { getStateEvents: () => [] },
+    currentState: { getStateEvents: (_eventType, stateKey) => (stateKey === undefined ? [] : null) },
 });
 
 export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
@@ -134,7 +142,7 @@ export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
     }, [refresh]);
 
     const wrap = useCallback(
-        async <T,>(fn: () => Promise<T>): Promise<T> => {
+        async <T>(fn: () => Promise<T>): Promise<T> => {
             try {
                 setError(null);
                 const result = await fn();
@@ -166,6 +174,9 @@ export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
                     roomId: input?.roomId ?? newPack.roomId,
                     stateKey: input?.stateKey ?? newPack.stateKey,
                     displayName: input?.displayName ?? newPack.displayName,
+                    avatarUrl: input?.avatarUrl ?? newPack.avatarUrl,
+                    attribution: input?.attribution ?? newPack.attribution,
+                    usage: input?.usage ?? newPack.usage,
                     images: input?.images ?? newPack.images,
                 }),
             ),
@@ -173,6 +184,8 @@ export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
             wrap(() => renameRoomPack(writers, roomId, stateKey, { displayName })),
         deleteRoomPack: (roomId: string, stateKey: string): Promise<void> =>
             wrap(() => deleteRoomPack(writers, roomId, stateKey)),
+        redactRoomPack: (roomId: string, eventId: string): Promise<void> =>
+            wrap(() => redactRoomPack(writers, roomId, eventId)),
         enablePackGlobally: (roomId: string, stateKey: string): Promise<void> =>
             wrap(() => enablePackGlobally(writers, { roomId, stateKey })),
         disablePackGlobally: (roomId: string, stateKey: string): Promise<void> =>
@@ -192,8 +205,9 @@ export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
         editUserEmote: (emote: EmoteDefinition): Promise<void> => wrap(() => editUserEmote(writers, emote)),
         removeUserEmote: (shortcode: string): Promise<void> => wrap(() => removeUserEmote(writers, shortcode)),
         setUserPack: (pack: ImagePackDefinition): Promise<void> => wrap(() => setUserPack(writers, pack)),
-        importPack: (payload: unknown, roomId: string, stateKey: string): Promise<void> =>
-            wrap(() => installPackToRoom(writers, roomId, stateKey, payload)),
+        deleteUserPack: (): Promise<void> => wrap(() => deleteUserPack(writers)),
+        importPack: (payload: unknown, roomId: string, stateKey: string, fallbackDisplayName?: string): Promise<void> =>
+            wrap(() => installPackToRoom(writers, roomId, stateKey, payload, fallbackDisplayName)),
         addSource: (source: DiscoverySource): Promise<DiscoverySource[]> => wrap(() => addSource(client, source)),
         removeSource: (sourceId: string): Promise<DiscoverySource[]> => wrap(() => removeSource(client, sourceId)),
         exportPack: (pack: ImagePackDefinition): string => JSON.stringify(exportPackJson(pack), null, 2),
