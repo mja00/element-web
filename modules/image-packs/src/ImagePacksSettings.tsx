@@ -43,7 +43,7 @@ export function ImagePacksSettings(props: ImagePacksSettingsProps): React.ReactE
                         <div>
                             <span className="mx_ImagePacksEyebrow">Account library</span>
                             <h3 id="image-packs-account-heading">Personal &amp; global packs</h3>
-                            <p>Only you can edit personal packs. Global packs follow you into every room.</p>
+                            <p>Keep one personal pack for your own emotes. Global packs follow you into every room.</p>
                         </div>
                         <span className="mx_ImagePacksCount">
                             {userPacks.length} {userPacks.length === 1 ? "pack" : "packs"}

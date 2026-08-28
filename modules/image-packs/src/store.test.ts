@@ -11,6 +11,7 @@ import {
     addRoomEmote,
     addSource,
     addUserEmote,
+    createUserPack,
     createRoomPack,
     deleteRoomPack,
     deleteUserPack,
@@ -70,6 +71,10 @@ class FakeWriters implements PackWriters {
 
     public async upsertUserImagePack(pack: ImagePackDefinition): Promise<void> {
         this.calls.push({ op: "upsertUserImagePack", args: [pack] });
+    }
+
+    public async createUserImagePack(pack: ImagePackDefinition): Promise<void> {
+        this.calls.push({ op: "createUserImagePack", args: [pack] });
     }
 
     public async replaceUserImagePack(pack: ImagePackDefinition): Promise<void> {
@@ -212,6 +217,13 @@ describe("pack store", () => {
         const writers = new FakeWriters();
         await deleteUserPack(writers);
         expect(writers.calls[0]).toEqual({ op: "deleteUserImagePack", args: [] });
+    });
+
+    it("creates a personal pack through its dedicated writer", async () => {
+        const writers = new FakeWriters();
+        const pack: ImagePackDefinition = { displayName: "New", images: {} };
+        await createUserPack(writers, pack);
+        expect(writers.calls[0]).toEqual({ op: "createUserImagePack", args: [pack] });
     });
 
     it("installs a parsed pack into a room", async () => {

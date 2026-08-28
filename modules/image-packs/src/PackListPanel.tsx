@@ -22,7 +22,7 @@ interface PackListPanelProps {
     onlyUserScope?: boolean;
     /** Show the room state-key creation form. */
     allowCreateRoomPack?: boolean;
-    /** Show the personal account-data creation form. */
+    /** Show the personal account-data creation form when no personal pack exists. */
     allowCreateUserPack?: boolean;
 }
 
@@ -56,6 +56,7 @@ export function PackListPanel(props: PackListPanelProps): React.ReactElement {
         return true;
     });
     const normalizedQuery = query.trim().toLowerCase();
+    const canCreateUserPack = allowCreateUserPack && !api.packs.some((pack) => pack.kind === "personal");
     const filtered = visible.filter((pack) => {
         if (!normalizedQuery) return true;
         return [pack.displayName, pack.stateKey, pack.kind, ...Object.keys(pack.pack.images)].some((value) =>
@@ -106,7 +107,7 @@ export function PackListPanel(props: PackListPanelProps): React.ReactElement {
                 ))
             )}
             {allowCreateRoomPack ? <NewPackCard api={api} restrictToRoomId={restrictToRoomId} /> : null}
-            {allowCreateUserPack ? <NewUserPackCard api={api} /> : null}
+            {canCreateUserPack ? <NewUserPackCard api={api} /> : null}
         </div>
     );
 }
@@ -609,7 +610,7 @@ function NewUserPackCard(props: { api: UseImagePacksResult }): React.ReactElemen
     const [displayName, setDisplayName] = useState("");
     const submit = async (): Promise<void> => {
         if (!displayName.trim()) return;
-        await api.setUserPack({ displayName: displayName.trim(), usage: ["emoticon"], images: {} });
+        await api.createUserPack({ displayName: displayName.trim(), usage: ["emoticon"], images: {} });
         setDisplayName("");
     };
     return (

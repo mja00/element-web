@@ -876,6 +876,24 @@ export async function upsertUserImagePack(client: MatrixClient, draft: ImagePack
     });
 }
 
+/** Create the account's personal image pack without replacing an existing one. */
+export async function createUserImagePack(client: MatrixClient, pack: ImagePackDefinition): Promise<void> {
+    await runAccountDataTransaction(client, async (transaction) => {
+        await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, (current) => {
+            if (hasVisiblePackContent(current)) {
+                throw new Error("A personal image pack already exists. Add emotes to it or rename it instead.");
+            }
+            return buildImagePackContent({
+                displayName: pack.displayName,
+                avatarUrl: pack.avatarUrl,
+                attribution: pack.attribution,
+                usage: pack.usage,
+                images: pack.images,
+            });
+        });
+    });
+}
+
 /** Replace the complete personal pack, including removing images absent from the new definition. */
 export async function replaceUserImagePack(client: MatrixClient, pack: ImagePackDefinition): Promise<void> {
     await runAccountDataTransaction(client, async (transaction) => {
@@ -952,6 +970,7 @@ export function createWritersFromClient(client: MatrixClient): PackWriters {
         reorderRoomImagePacks: (roomId, orderedKeys) => reorderRoomImagePacks(client, roomId, orderedKeys),
         redactRoomImagePack: (roomId, eventId) => redactRoomImagePack(client, roomId, eventId),
         getRoomImagePackOrder: (roomId) => getRoomImagePackOrder(client, roomId),
+        createUserImagePack: (pack) => createUserImagePack(client, pack),
         upsertUserImagePack: (pack) => upsertUserImagePack(client, pack),
         replaceUserImagePack: (pack) => replaceUserImagePack(client, pack),
         upsertUserPackEmote: (emote) => upsertUserPackEmote(client, emote),

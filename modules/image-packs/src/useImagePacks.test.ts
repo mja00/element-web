@@ -34,6 +34,7 @@ function mockWriters(): PackWriters {
         reorderRoomImagePacks: vi.fn().mockResolvedValue(undefined),
         redactRoomImagePack: vi.fn().mockResolvedValue(undefined),
         getRoomImagePackOrder: vi.fn().mockReturnValue(null),
+        createUserImagePack: vi.fn().mockResolvedValue(undefined),
         upsertUserImagePack: vi.fn().mockResolvedValue(undefined),
         replaceUserImagePack: vi.fn().mockResolvedValue(undefined),
         deleteUserImagePack: vi.fn().mockResolvedValue(undefined),
@@ -102,6 +103,7 @@ describe("useImagePacks", () => {
             await result.current.editRoomEmote(room.roomId, "pack", newEmote);
             await result.current.removeRoomEmote(room.roomId, "pack", "smile");
             await result.current.addUserEmote(newEmote);
+            await result.current.createUserPack(pack);
             await result.current.editUserEmote(newEmote);
             await result.current.removeUserEmote("smile");
             await result.current.setUserPack(pack);
@@ -127,6 +129,7 @@ describe("useImagePacks", () => {
         expect(writers.upsertRoomPackEmote).toHaveBeenCalled();
         expect(writers.removeRoomPackEmote).toHaveBeenCalledWith(room.roomId, "pack", "smile");
         expect(writers.upsertUserPackEmote).toHaveBeenCalled();
+        expect(writers.createUserImagePack).toHaveBeenCalledWith(pack);
         expect(writers.removeUserPackEmote).toHaveBeenCalledWith("smile");
         expect(writers.replaceUserImagePack).toHaveBeenCalledWith(pack);
         expect(writers.deleteUserImagePack).toHaveBeenCalledOnce();

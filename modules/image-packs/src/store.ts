@@ -32,6 +32,7 @@ export interface PackWriters {
     reorderRoomImagePacks(roomId: string, orderedStateKeys: string[]): Promise<void>;
     redactRoomImagePack(roomId: string, eventId: string): Promise<void>;
     getRoomImagePackOrder(roomId: string): { stateKeys: string[] } | null;
+    createUserImagePack(pack: ImagePackDefinition): Promise<void>;
     upsertUserImagePack(pack: ImagePackDefinition): Promise<void>;
     replaceUserImagePack(pack: ImagePackDefinition): Promise<void>;
     deleteUserImagePack(): Promise<void>;
@@ -168,6 +169,10 @@ export async function disablePackGlobally(
 
 export async function addUserEmote(writers: PackWriters, emote: EmoteDefinition): Promise<void> {
     await writers.upsertUserPackEmote(emote);
+}
+
+export async function createUserPack(writers: PackWriters, pack: ImagePackDefinition): Promise<void> {
+    await writers.createUserImagePack(pack);
 }
 
 export async function editUserEmote(writers: PackWriters, emote: EmoteDefinition): Promise<void> {

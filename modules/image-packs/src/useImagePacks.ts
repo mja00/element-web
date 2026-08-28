@@ -13,6 +13,7 @@ import {
     addRoomEmote,
     addSource,
     addUserEmote,
+    createUserPack,
     createRoomPack,
     deleteRoomPack,
     deleteUserPack,
@@ -86,6 +87,7 @@ export interface UseImagePacksResult {
     editRoomEmote: (roomId: string, stateKey: string, emote: EmoteDefinition) => Promise<void>;
     removeRoomEmote: (roomId: string, stateKey: string, shortcode: string) => Promise<void>;
     addUserEmote: (emote: EmoteDefinition) => Promise<void>;
+    createUserPack: (pack: ImagePackDefinition) => Promise<void>;
     editUserEmote: (emote: EmoteDefinition) => Promise<void>;
     removeUserEmote: (shortcode: string) => Promise<void>;
     setUserPack: (pack: ImagePackDefinition) => Promise<void>;
@@ -213,6 +215,7 @@ export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
         removeRoomEmote: (roomId: string, stateKey: string, shortcode: string): Promise<void> =>
             wrap(() => removeRoomEmote(writers, roomId, stateKey, shortcode)),
         addUserEmote: (emote: EmoteDefinition): Promise<void> => wrap(() => addUserEmote(writers, emote)),
+        createUserPack: (pack: ImagePackDefinition): Promise<void> => wrap(() => createUserPack(writers, pack)),
         editUserEmote: (emote: EmoteDefinition): Promise<void> => wrap(() => editUserEmote(writers, emote)),
         removeUserEmote: (shortcode: string): Promise<void> => wrap(() => removeUserEmote(writers, shortcode)),
         setUserPack: (pack: ImagePackDefinition): Promise<void> => wrap(() => setUserPack(writers, pack)),

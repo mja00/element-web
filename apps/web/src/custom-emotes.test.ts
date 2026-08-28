@@ -13,6 +13,7 @@ import { mkEvent, mkStubRoom, mockStateEventImplementation } from "test-utils";
 
 import {
     createRoomImagePack,
+    createUserImagePack,
     decorateCustomEmotes,
     deleteUserImagePack,
     deleteRoomImagePack,
@@ -606,6 +607,21 @@ describe("image pack writer helpers", () => {
             pack: { display_name: "Mine" },
             images: { wave: { url: "mxc://e/wave" } },
         });
+    });
+
+    it("does not replace an existing personal pack when creating one", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room, {
+            [LEGACY_USER_IMAGE_PACK_EVENT_TYPE]: {
+                pack: { display_name: "Neofox", usage: ["emoticon"] },
+                images: { fox: { url: "mxc://e/fox" } },
+            },
+        });
+
+        await expect(
+            createUserImagePack(client, { displayName: "Testing", usage: ["emoticon"], images: {} }),
+        ).rejects.toThrow("A personal image pack already exists");
+        expect(client.setAccountData).not.toHaveBeenCalled();
     });
 
     it("replaces the complete personal pack without retaining stale images", async () => {

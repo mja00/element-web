@@ -96,6 +96,7 @@ function makeApi(overrides: Partial<UseImagePacksResult> = {}): UseImagePacksRes
         editRoomEmote: vi.fn().mockResolvedValue(undefined),
         removeRoomEmote: vi.fn().mockResolvedValue(undefined),
         addUserEmote: vi.fn().mockResolvedValue(undefined),
+        createUserPack: vi.fn().mockResolvedValue(undefined),
         editUserEmote: vi.fn().mockResolvedValue(undefined),
         removeUserEmote: vi.fn().mockResolvedValue(undefined),
         setUserPack: vi.fn().mockResolvedValue(undefined),
@@ -305,7 +306,7 @@ describe("PackListPanel", () => {
 
     it("creates a personal pack and filters user rows", async () => {
         const user = userEvent.setup();
-        const api = makeApi({ packs: [personalPack, roomPack] });
+        const api = makeApi({ packs: [globalPack, roomPack] });
         render(<PackListPanel api={api} onlyUserScope allowCreateUserPack />);
 
         expect(screen.queryByTestId("pack-!room:example.org-room")).toBeNull();
@@ -313,7 +314,15 @@ describe("PackListPanel", () => {
         await user.click(within(newUserPack).getByRole("button", { name: "Create pack" }));
         await user.type(within(newUserPack).getByRole("textbox", { name: "Personal pack display name" }), "Personal 2");
         await user.click(within(newUserPack).getByRole("button", { name: "Create pack" }));
-        expect(api.setUserPack).toHaveBeenCalledWith({ displayName: "Personal 2", usage: ["emoticon"], images: {} });
+        expect(api.createUserPack).toHaveBeenCalledWith({ displayName: "Personal 2", usage: ["emoticon"], images: {} });
+    });
+
+    it("does not offer a second personal pack that would replace the existing one", () => {
+        const api = makeApi({ packs: [personalPack] });
+        render(<PackListPanel api={api} onlyUserScope allowCreateUserPack />);
+
+        expect(screen.getByTestId("pack-personal")).toBeTruthy();
+        expect(screen.queryByTestId("new-user-pack-form")).toBeNull();
     });
 });
 
