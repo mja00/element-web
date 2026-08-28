@@ -534,8 +534,6 @@ export function prepareCustomEmotesForEditing(html: string): EditableCustomEmote
  * The writer and reader paths share the same wire representation.
  */
 
-export type ImagePackScope = "user" | "room" | "space";
-
 const IMAGE_PACK_USAGE_EMOTICON = "emoticon";
 
 export interface EmoteEdit {
@@ -714,9 +712,6 @@ export async function removeRoomPackEmote(
 export async function redactRoomImagePack(client: MatrixClient, roomId: string, eventId: string): Promise<void> {
     await client.redactEvent(roomId, eventId);
 }
-
-/** @deprecated Ordering is stored in account data; retained for old callers. */
-export const ROOM_IMAGE_PACK_ORDER_STATE_KEY = LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY;
 
 export interface RoomImagePackOrder {
     stateKeys: string[];

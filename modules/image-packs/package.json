@@ -8,7 +8,8 @@
     "exports": {
         ".": {
             "types": "./src/index.tsx",
-            "import": "./lib/index.js"
+            "import": "./lib/index.js",
+            "require": "./lib/index.js"
         }
     },
     "scripts": {
@@ -31,10 +32,7 @@
         "vitest": "catalog:"
     },
     "dependencies": {
-        "@vector-im/compound-design-tokens": "^10.0.0",
-        "@vector-im/compound-web": "^9.0.0",
         "matrix-web-i18n": "^3.6.0",
-        "styled-components": "^6.3.11",
         "zod": "^4.0.0"
     }
 }

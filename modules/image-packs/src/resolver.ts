@@ -14,7 +14,7 @@ import {
     LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY,
     ROOM_IMAGE_PACK_ORDER_EVENT_TYPE,
 } from "./types.ts";
-import type { DiscoverySource, ImagePackDefinition, ImagePackKind, ImagePackScope } from "./types.ts";
+import type { ImagePackDefinition, ImagePackKind, ImagePackScope } from "./types.ts";
 export {
     IMAGE_PACK_EVENT_TYPE,
     IMAGE_PACK_ROOMS_EVENT_TYPE,
@@ -238,24 +238,4 @@ export function resolveEnabledPacks(
     }
 
     return out;
-}
-
-export function listEnabledSourceIds(client: ResolverClient): Set<string> {
-    const out = new Set<string>();
-    for (const eventType of [IMAGE_PACK_ROOMS_EVENT_TYPE, LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE]) {
-        const event = client.getAccountData(eventType);
-        const content = event?.getContent();
-        if (!isRecord(content) || !isRecord(content.rooms)) continue;
-        for (const packs of Object.values(content.rooms)) {
-            if (!isRecord(packs)) continue;
-            for (const stateKey of Object.keys(packs)) {
-                out.add(stateKey);
-            }
-        }
-    }
-    return out;
-}
-
-export function discoverySourcesForResolver(sources: readonly DiscoverySource[]): DiscoverySource[] {
-    return [...sources].sort((a, b) => a.id.localeCompare(b.id));
 }

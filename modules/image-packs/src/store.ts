@@ -151,9 +151,6 @@ export async function redactRoomPack(writers: PackWriters, roomId: string, event
     await writers.redactRoomImagePack(roomId, eventId);
 }
 
-export function getRoomPackOrder(writers: PackWriters, roomId: string): { stateKeys: string[] } | null {
-    return writers.getRoomImagePackOrder(roomId);
-}
 export async function enablePackGlobally(
     writers: PackWriters,
     reference: { roomId: string; stateKey: string },
