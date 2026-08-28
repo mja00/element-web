@@ -43,11 +43,30 @@ interface AccountDataTransactionState {
 
 const accountDataTransactions = new WeakMap<MatrixClient, AccountDataTransactionState>();
 
+const IMAGE_PACK_ACCOUNT_DATA_EVENT_TYPES = new Set([
+    IMAGE_PACK_ROOMS_EVENT_TYPE,
+    LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE,
+    LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
+    ROOM_IMAGE_PACK_ORDER_EVENT_TYPE,
+    "org.element.image_pack_servers",
+    "org.element.image_pack_servers.unstable",
+    "im.ponies.image_pack_servers",
+    "org.matrix.msc2654.image_pack_servers",
+]);
+const IMAGE_PACK_ROOM_STATE_EVENT_TYPES = new Set([IMAGE_PACK_EVENT_TYPE, LEGACY_IMAGE_PACK_EVENT_TYPE]);
+
 /** Subscribe settings surfaces to Matrix cache updates that can change image packs. */
 export function subscribeToImagePackChanges(client: MatrixClient, listener: () => void, roomId?: string): () => void {
-    const onAccountData = (): void => listener();
-    const onRoomState = (_event: MatrixEvent, state: RoomState): void => {
-        if (roomId === undefined || state.roomId === roomId) listener();
+    const onAccountData = (event: MatrixEvent): void => {
+        if (IMAGE_PACK_ACCOUNT_DATA_EVENT_TYPES.has(event.getType())) listener();
+    };
+    const onRoomState = (event: MatrixEvent, state: RoomState): void => {
+        if (
+            (roomId === undefined || state.roomId === roomId) &&
+            IMAGE_PACK_ROOM_STATE_EVENT_TYPES.has(event.getType())
+        ) {
+            listener();
+        }
     };
 
     client.on(ClientEvent.AccountData, onAccountData);
