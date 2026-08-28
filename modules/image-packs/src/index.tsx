@@ -11,6 +11,7 @@ import type { Api, Module, ModuleFactory } from "@element-hq/element-web-module-
 
 import { ImagePacksSettings } from "./ImagePacksSettings.tsx";
 import { useImagePacks, type UseImagePacksOptions } from "./useImagePacks.ts";
+import style from "./style.css" with { type: "css" };
 /**
  * Shape the host application must expose on `api.customisations` for the
  * module to mount its settings UI. The host constructs a `PackWriters`
@@ -29,6 +30,10 @@ class ImagePacksModule implements Module {
     public constructor(private readonly api: Api) {}
 
     public async load(): Promise<void> {
+        if (!document.adoptedStyleSheets.includes(style)) {
+            document.adoptedStyleSheets.push(style);
+        }
+
         const customisations = this.api.customisations as unknown as ImagePacksMountCustomisations;
 
         if (typeof customisations.registerImagePacksMount === "function") {

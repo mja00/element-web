@@ -190,6 +190,32 @@ describe("PackListPanel", () => {
         expect(api.disablePackGlobally).toHaveBeenCalledWith("!packs:example.org", "global");
     });
 
+    it("keeps large packs scannable and searchable", async () => {
+        const user = userEvent.setup();
+        const images = Object.fromEntries(
+            Array.from({ length: 25 }, (_, index) => [
+                `emote_${index}`,
+                { shortcode: `emote_${index}`, url: `mxc://example.org/emote-${index}` },
+            ]),
+        );
+        const api = makeApi({
+            packs: [{ ...personalPack, pack: { ...personalPack.pack, images } }],
+        });
+
+        render(<PackListPanel api={api} onlyUserScope />);
+
+        expect(screen.getAllByTestId(/^emote-/)).toHaveLength(24);
+        await user.click(screen.getByRole("button", { name: "Show all 25 emotes" }));
+        expect(screen.getAllByTestId(/^emote-/)).toHaveLength(25);
+
+        const search = screen.getByLabelText("Find a pack");
+        await user.type(search, "does-not-exist");
+        expect(screen.getByText("No packs match that search")).toBeTruthy();
+        await user.clear(search);
+        await user.type(search, "emote_24");
+        expect(screen.getByTestId("pack-personal")).toBeTruthy();
+    });
+
     it("handles room actions, emote validation, and creation forms", async () => {
         const user = userEvent.setup();
         const api = makeApi({ packs: [roomPack, roomWithoutEventId, spacePack] });
