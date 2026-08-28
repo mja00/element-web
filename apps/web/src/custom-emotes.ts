@@ -6,7 +6,15 @@ Please see LICENSE files in the repository root for full details.
 */
 
 import escapeHtml from "escape-html";
-import { KnownMembership, type MatrixClient, type MatrixEvent, type Room } from "matrix-js-sdk/src/matrix";
+import {
+    ClientEvent,
+    KnownMembership,
+    RoomStateEvent,
+    type MatrixClient,
+    type MatrixEvent,
+    type Room,
+    type RoomState,
+} from "matrix-js-sdk/src/matrix";
 import { type RoomMessageEventContent, type RoomMessageTextEventContent } from "matrix-js-sdk/src/types";
 
 import type {
@@ -34,6 +42,22 @@ interface AccountDataTransactionState {
 }
 
 const accountDataTransactions = new WeakMap<MatrixClient, AccountDataTransactionState>();
+
+/** Subscribe settings surfaces to Matrix cache updates that can change image packs. */
+export function subscribeToImagePackChanges(client: MatrixClient, listener: () => void, roomId?: string): () => void {
+    const onAccountData = (): void => listener();
+    const onRoomState = (_event: MatrixEvent, state: RoomState): void => {
+        if (roomId === undefined || state.roomId === roomId) listener();
+    };
+
+    client.on(ClientEvent.AccountData, onAccountData);
+    client.on(RoomStateEvent.Events, onRoomState);
+
+    return () => {
+        client.removeListener(ClientEvent.AccountData, onAccountData);
+        client.removeListener(RoomStateEvent.Events, onRoomState);
+    };
+}
 
 /** Serialize read-modify-write account-data operations for one Matrix client. */
 export async function runAccountDataTransaction<T>(
