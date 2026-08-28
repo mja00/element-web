@@ -61,15 +61,22 @@ export interface AccountDataLike {
     getContent(): unknown;
 }
 
+export type AccountDataContentUpdate =
+    | object
+    | ((current: unknown) => object | undefined | Promise<object | undefined>);
+
 export interface AccountDataTransaction {
     get(eventType: string): unknown;
-    set(eventType: string, content: unknown): Promise<unknown>;
+    /** Bypass a transaction snapshot when a write must include remote changes received after the initial read. */
+    getLatest?(eventType: string): Promise<unknown>;
+    set(eventType: string, content: AccountDataContentUpdate): Promise<unknown>;
 }
 
 export type AccountDataTransactionCallback<T> = (transaction: AccountDataTransaction) => Promise<T> | T;
 
 export interface AccountDataWriter {
     getAccountData(eventType: string): AccountDataLike | null | undefined;
+    getAccountDataFromServer?(eventType: string): Promise<unknown | null>;
     setAccountData(eventType: string, content: unknown): Promise<unknown>;
     runAccountDataTransaction?<T>(callback: AccountDataTransactionCallback<T>): Promise<T>;
 }
@@ -94,14 +101,33 @@ async function runAccountDataTransaction<T>(
         .catch(() => undefined)
         .then(async () => {
             const values = new Map<string, unknown>();
+            const written = new Set<string>();
+            const getLatest = async (eventType: string): Promise<unknown> => {
+                if (written.has(eventType)) return values.get(eventType);
+                if (writer.getAccountDataFromServer) {
+                    try {
+                        const current = await writer.getAccountDataFromServer(eventType);
+                        if (current !== undefined) {
+                            values.set(eventType, current ?? undefined);
+                            return values.get(eventType);
+                        }
+                    } catch {
+                        // Keep the synchronized local value if a refresh fails so the write can still proceed.
+                    }
+                }
+                const current = writer.getAccountData(eventType)?.getContent();
+                return current;
+            };
             const transaction: AccountDataTransaction = {
-                get: (eventType) => {
-                    if (!values.has(eventType)) values.set(eventType, writer.getAccountData(eventType)?.getContent());
-                    return values.get(eventType);
-                },
+                get: (eventType) =>
+                    written.has(eventType) ? values.get(eventType) : writer.getAccountData(eventType)?.getContent(),
+                getLatest,
                 set: async (eventType, content) => {
-                    values.set(eventType, content);
-                    return writer.setAccountData(eventType, content);
+                    const next = typeof content === "function" ? await content(await getLatest(eventType)) : content;
+                    if (next === undefined) return {};
+                    values.set(eventType, next);
+                    written.add(eventType);
+                    return writer.setAccountData(eventType, next);
                 },
             };
             return update(transaction);
@@ -181,22 +207,40 @@ export async function addDiscoverySource(
     const parsed = sourceSchema.safeParse({ ...source, id: source.id.trim(), url: source.url.trim() });
     if (!parsed.success) throw new DiscoverySourceError(parsed.error.issues[0]?.message ?? "Invalid discovery source.");
     return runAccountDataTransaction(writer, async (transaction) => {
-        const current = mergeSources(
-            DISCOVERY_SOURCE_EVENT_TYPES.flatMap((eventType) => readSourcesFromContent(transaction.get(eventType))),
-        );
-        const next = [...current.filter((item) => item.id !== parsed.data.id), normaliseSource(parsed.data)];
-        await transaction.set(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, { sources: next });
+        let next: DiscoverySource[] = [];
+        await transaction.set(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, async (current) => {
+            const fallback = await Promise.all(
+                DISCOVERY_SOURCE_EVENT_TYPES.filter(
+                    (eventType) => eventType !== IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+                ).map((eventType) => transaction.getLatest?.(eventType) ?? transaction.get(eventType)),
+            );
+            const sources = mergeSources([
+                ...readSourcesFromContent(current),
+                ...fallback.flatMap((content) => readSourcesFromContent(content)),
+            ]);
+            next = [...sources.filter((item) => item.id !== parsed.data.id), normaliseSource(parsed.data)];
+            return { sources: next };
+        });
         return next;
     });
 }
 
 export async function removeDiscoverySource(writer: AccountDataWriter, sourceId: string): Promise<DiscoverySource[]> {
     return runAccountDataTransaction(writer, async (transaction) => {
-        const current = mergeSources(
-            DISCOVERY_SOURCE_EVENT_TYPES.flatMap((eventType) => readSourcesFromContent(transaction.get(eventType))),
-        );
-        const next = current.filter((s) => s.id !== sourceId);
-        await transaction.set(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, { sources: next });
+        let next: DiscoverySource[] = [];
+        await transaction.set(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, async (current) => {
+            const fallback = await Promise.all(
+                DISCOVERY_SOURCE_EVENT_TYPES.filter(
+                    (eventType) => eventType !== IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+                ).map((eventType) => transaction.getLatest?.(eventType) ?? transaction.get(eventType)),
+            );
+            const sources = mergeSources([
+                ...readSourcesFromContent(current),
+                ...fallback.flatMap((content) => readSourcesFromContent(content)),
+            ]);
+            next = sources.filter((source) => source.id !== sourceId);
+            return { sources: next };
+        });
         return next;
     });
 }

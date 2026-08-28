@@ -31,8 +31,6 @@ const CUSTOM_EMOTE_TOKEN = new RegExp(`:(${SHORTCODE_PATTERN})(?:/(${SHORTCODE_P
 
 interface AccountDataTransactionState {
     tail: Promise<void>;
-    values: Map<string, unknown>;
-    generation: number;
 }
 
 const accountDataTransactions = new WeakMap<MatrixClient, AccountDataTransactionState>();
@@ -45,43 +43,57 @@ export async function runAccountDataTransaction<T>(
     const state =
         accountDataTransactions.get(client) ??
         (() => {
-            const initial: AccountDataTransactionState = { tail: Promise.resolve(), values: new Map(), generation: 0 };
+            const initial: AccountDataTransactionState = { tail: Promise.resolve() };
             accountDataTransactions.set(client, initial);
             return initial;
         })();
     const previous = state.tail;
-    const generation = ++state.generation;
     const operation = previous
         .catch(() => undefined)
         .then(async () => {
-            const transaction: AccountDataTransaction = {
-                get: (eventType) => {
-                    if (!state.values.has(eventType)) {
-                        state.values.set(eventType, client.getAccountData(eventType as never)?.getContent());
+            const values = new Map<string, unknown>();
+            const written = new Set<string>();
+            const getLatest = async (eventType: string): Promise<unknown> => {
+                if (written.has(eventType)) return values.get(eventType);
+                const getFromServer = (
+                    client as MatrixClient & {
+                        getAccountDataFromServer?: (type: string) => Promise<unknown | null>;
                     }
-                    return state.values.get(eventType);
-                },
+                ).getAccountDataFromServer;
+                if (typeof getFromServer === "function") {
+                    try {
+                        const current = await getFromServer.call(client, eventType);
+                        if (current !== undefined) {
+                            values.set(eventType, current ?? undefined);
+                            return values.get(eventType);
+                        }
+                    } catch {
+                        // Keep the synchronized local value if a refresh fails so the write can still proceed.
+                    }
+                }
+                const current = client.getAccountData(eventType as never)?.getContent();
+                return current;
+            };
+            const transaction: AccountDataTransaction = {
+                get: (eventType) =>
+                    written.has(eventType)
+                        ? values.get(eventType)
+                        : client.getAccountData(eventType as never)?.getContent(),
+                getLatest,
                 set: async (eventType, content) => {
-                    state.values.set(eventType, content);
-                    return client.setAccountData(eventType as never, content as never);
+                    const next = typeof content === "function" ? await content(await getLatest(eventType)) : content;
+                    if (next === undefined) return {};
+                    values.set(eventType, next);
+                    written.add(eventType);
+                    return client.setAccountData(eventType as never, next as never);
                 },
             };
-            try {
-                return await update(transaction);
-            } catch (error) {
-                state.values.clear();
-                throw error;
-            }
+            return update(transaction);
         });
-    const settled = operation.then(
-        () => {
-            if (state.generation === generation) state.values.clear();
-        },
-        () => {
-            if (state.generation === generation) state.values.clear();
-        },
+    state.tail = operation.then(
+        () => undefined,
+        () => undefined,
     );
-    state.tail = settled;
     return operation;
 }
 
@@ -741,19 +753,20 @@ export async function reorderRoomImagePacks(
     orderedStateKeys: string[],
 ): Promise<void> {
     await runAccountDataTransaction(client, async (transaction) => {
-        const current = transaction.get(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE);
-        const rooms: Record<string, string[]> =
-            isRecord(current) && isRecord(current.rooms)
-                ? Object.fromEntries(
-                      Object.entries(current.rooms).flatMap(([id, value]) =>
-                          Array.isArray(value)
-                              ? [[id, value.filter((key): key is string => typeof key === "string")]]
-                              : [],
-                      ),
-                  )
-                : {};
-        rooms[roomId] = orderedStateKeys.filter((key) => key !== LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY);
-        await transaction.set(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE, { rooms });
+        await transaction.set(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE, (current) => {
+            const rooms: Record<string, string[]> =
+                isRecord(current) && isRecord(current.rooms)
+                    ? Object.fromEntries(
+                          Object.entries(current.rooms).flatMap(([id, value]) =>
+                              Array.isArray(value)
+                                  ? [[id, value.filter((key): key is string => typeof key === "string")]]
+                                  : [],
+                          ),
+                      )
+                    : {};
+            rooms[roomId] = orderedStateKeys.filter((key) => key !== LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY);
+            return { rooms };
+        });
     });
 }
 
@@ -798,17 +811,21 @@ function readRoomsContent(content: unknown): Record<string, Record<string, objec
  */
 export async function enableGlobalPack(client: MatrixClient, reference: GlobalPackReference): Promise<void> {
     await runAccountDataTransaction(client, async (transaction) => {
-        const stable = readRoomsContent(transaction.get(IMAGE_PACK_ROOMS_EVENT_TYPE));
-        const stableRoom = { ...stable[reference.roomId] };
-        stableRoom[reference.stateKey] = {};
-        stable[reference.roomId] = stableRoom;
-        await transaction.set(IMAGE_PACK_ROOMS_EVENT_TYPE, { rooms: stable });
+        await transaction.set(IMAGE_PACK_ROOMS_EVENT_TYPE, (current) => {
+            const stable = readRoomsContent(current);
+            const stableRoom = { ...stable[reference.roomId] };
+            stableRoom[reference.stateKey] = {};
+            stable[reference.roomId] = stableRoom;
+            return { rooms: stable };
+        });
 
-        const legacy = readRoomsContent(transaction.get(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE));
-        const legacyRoom = { ...legacy[reference.roomId] };
-        legacyRoom[reference.stateKey] = {};
-        legacy[reference.roomId] = legacyRoom;
-        await transaction.set(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, { rooms: legacy });
+        await transaction.set(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, (current) => {
+            const legacy = readRoomsContent(current);
+            const legacyRoom = { ...legacy[reference.roomId] };
+            legacyRoom[reference.stateKey] = {};
+            legacy[reference.roomId] = legacyRoom;
+            return { rooms: legacy };
+        });
     });
 }
 
@@ -819,23 +836,25 @@ export async function enableGlobalPack(client: MatrixClient, reference: GlobalPa
  */
 export async function disableGlobalPack(client: MatrixClient, reference: GlobalPackReference): Promise<void> {
     await runAccountDataTransaction(client, async (transaction) => {
-        const stable = readRoomsContent(transaction.get(IMAGE_PACK_ROOMS_EVENT_TYPE));
-        if (stable[reference.roomId]) {
+        await transaction.set(IMAGE_PACK_ROOMS_EVENT_TYPE, (current) => {
+            const stable = readRoomsContent(current);
+            if (!stable[reference.roomId]) return undefined;
             const next = { ...stable[reference.roomId] };
             delete next[reference.stateKey];
             if (Object.keys(next).length === 0) delete stable[reference.roomId];
             else stable[reference.roomId] = next;
-            await transaction.set(IMAGE_PACK_ROOMS_EVENT_TYPE, { rooms: stable });
-        }
+            return { rooms: stable };
+        });
 
-        const legacy = readRoomsContent(transaction.get(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE));
-        if (legacy[reference.roomId]) {
+        await transaction.set(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, (current) => {
+            const legacy = readRoomsContent(current);
+            if (!legacy[reference.roomId]) return undefined;
             const next = { ...legacy[reference.roomId] };
             delete next[reference.stateKey];
             if (Object.keys(next).length === 0) delete legacy[reference.roomId];
             else legacy[reference.roomId] = next;
-            await transaction.set(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, { rooms: legacy });
-        }
+            return { rooms: legacy };
+        });
     });
 }
 
@@ -851,9 +870,9 @@ function readUserPackContent(content: unknown): ImagePackContent {
  */
 export async function upsertUserImagePack(client: MatrixClient, draft: ImagePackDraft): Promise<void> {
     await runAccountDataTransaction(client, async (transaction) => {
-        const previous = readUserPackContent(transaction.get(LEGACY_USER_IMAGE_PACK_EVENT_TYPE));
-        const content = buildImagePackContent(draft, previous);
-        await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, content);
+        await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, (current) =>
+            buildImagePackContent(draft, readUserPackContent(current)),
+        );
     });
 }
 
@@ -883,15 +902,15 @@ export async function deleteUserImagePack(client: MatrixClient): Promise<void> {
  */
 export async function upsertUserPackEmote(client: MatrixClient, emote: EmoteEdit): Promise<void> {
     await runAccountDataTransaction(client, async (transaction) => {
-        const existingContent = transaction.get(LEGACY_USER_IMAGE_PACK_EVENT_TYPE);
-        const hasPack =
-            isRecord(existingContent) && (isRecord(existingContent.images) || isRecord(existingContent.pack));
-        const previous = readUserPackContent(existingContent);
-        const content = buildImagePackContent(
-            { images: { [emote.shortcode]: emote }, ...(hasPack ? {} : { usage: [IMAGE_PACK_USAGE_EMOTICON] }) },
-            previous,
-        );
-        await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, content);
+        await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, (existingContent) => {
+            const hasPack =
+                isRecord(existingContent) && (isRecord(existingContent.images) || isRecord(existingContent.pack));
+            const previous = readUserPackContent(existingContent);
+            return buildImagePackContent(
+                { images: { [emote.shortcode]: emote }, ...(hasPack ? {} : { usage: [IMAGE_PACK_USAGE_EMOTICON] }) },
+                previous,
+            );
+        });
     });
 }
 
@@ -900,11 +919,13 @@ export async function upsertUserPackEmote(client: MatrixClient, emote: EmoteEdit
  */
 export async function removeUserPackEmote(client: MatrixClient, shortcode: string): Promise<void> {
     await runAccountDataTransaction(client, async (transaction) => {
-        const previous = readUserPackContent(transaction.get(LEGACY_USER_IMAGE_PACK_EVENT_TYPE));
-        if (!previous.images[shortcode]) return;
-        const next: ImagePackContent = cloneImagePackContent(previous);
-        delete next.images[shortcode];
-        await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, next);
+        await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, (current) => {
+            const previous = readUserPackContent(current);
+            if (!previous.images[shortcode]) return undefined;
+            const next: ImagePackContent = cloneImagePackContent(previous);
+            delete next.images[shortcode];
+            return next;
+        });
     });
 }
 

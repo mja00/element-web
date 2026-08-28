@@ -33,6 +33,7 @@ import {
     removeUserPackEmote,
     resolveCustomEmoteToken,
     reorderRoomImagePacks,
+    runAccountDataTransaction,
     updateRoomImagePackMetadata,
     replaceUserImagePack,
     upsertRoomPackEmote,
@@ -562,6 +563,34 @@ describe("image pack writer helpers", () => {
             rooms: {
                 "!one:example.org": ["new-one"],
                 "!two:example.org": ["new-two"],
+            },
+        });
+    });
+
+    it("refreshes account data before applying a cached transaction update", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const stale = { rooms: { "!stale:example.org": ["stale"] } };
+        const remote = { rooms: { "!remote:example.org": ["remote"] } };
+        const client = clientWithRoom(room, { [ROOM_IMAGE_PACK_ORDER_EVENT_TYPE]: stale });
+        Object.assign(client, {
+            getAccountDataFromServer: vi.fn(async () => remote),
+        });
+
+        await runAccountDataTransaction(client, async (transaction) => {
+            expect(transaction.get(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE)).toEqual(stale);
+            await transaction.set(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE, (current) => {
+                const rooms =
+                    typeof current === "object" && current !== null && "rooms" in current
+                        ? (current.rooms as Record<string, string[]>)
+                        : {};
+                return { rooms: { ...rooms, "!local:example.org": ["local"] } };
+            });
+        });
+
+        expect(client.setAccountData).toHaveBeenCalledWith(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE, {
+            rooms: {
+                "!remote:example.org": ["remote"],
+                "!local:example.org": ["local"],
             },
         });
     });

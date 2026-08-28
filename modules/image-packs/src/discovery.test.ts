@@ -20,6 +20,7 @@ import type { AccountDataWriter } from "./discovery.ts";
 
 class FakeWriter implements AccountDataWriter {
     private store = new Map<string, Record<string, unknown>>();
+    public getAccountDataFromServer?: (eventType: string) => Promise<unknown | null>;
 
     public constructor(private readonly delayWrites = false) {}
 
@@ -102,6 +103,29 @@ describe("image-pack discovery sources", () => {
                 .map((source) => source.id)
                 .sort(),
         ).toEqual(["a", "b"]);
+    });
+
+    it("refreshes the stable source list before applying an update", async () => {
+        const writer = new FakeWriter();
+        await writer.setAccountData(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, {
+            sources: [{ id: "stale", url: "https://example.org/stale.json" }],
+        });
+        writer.getAccountDataFromServer = async (eventType) => {
+            if (eventType === IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE) {
+                return { sources: [{ id: "remote", url: "https://example.org/remote.json" }] };
+            }
+            return writer.getAccountData(eventType)?.getContent() ?? null;
+        };
+
+        const list = await addDiscoverySource(writer, { id: "local", url: "https://example.org/local.json" });
+
+        expect(list.map((source) => source.id).sort()).toEqual(["local", "remote"]);
+        expect(writer.raw(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE)).toEqual({
+            sources: [
+                { id: "remote", url: "https://example.org/remote.json", displayName: "example.org" },
+                { id: "local", url: "https://example.org/local.json", displayName: "example.org" },
+            ],
+        });
     });
 
     it("fills missing pack metadata from the discovery index", () => {

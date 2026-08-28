@@ -44,6 +44,7 @@ export interface PackWriters {
 export interface PackStoreClient {
     getUserId(): string | null;
     getAccountData(eventType: string): { getContent(): unknown } | null | undefined;
+    getAccountDataFromServer?(eventType: string): Promise<unknown | null>;
     setAccountData(eventType: string, content: unknown): Promise<unknown>;
     runAccountDataTransaction?<T>(callback: AccountDataTransactionCallback<T>): Promise<T>;
 }
@@ -190,6 +191,9 @@ function asAccountDataWriter(client: PackStoreClient): AccountDataWriter {
         getAccountData: (eventType) => client.getAccountData(eventType),
         setAccountData: (eventType, content) => client.setAccountData(eventType, content),
     };
+    if (client.getAccountDataFromServer) {
+        writer.getAccountDataFromServer = client.getAccountDataFromServer.bind(client);
+    }
     if (client.runAccountDataTransaction) {
         writer.runAccountDataTransaction = client.runAccountDataTransaction.bind(client);
     }
