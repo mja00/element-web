@@ -33,54 +33,6 @@ Please see LICENSE files in the repository root for full details.
     box-sizing: border-box;
 }
 
-.mx_ImagePacksHero {
-    position: relative;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 24px;
-    min-height: 210px;
-    overflow: hidden;
-    margin: 0 0 40px;
-    padding: 32px;
-    border: 1px solid color-mix(in srgb, var(--mx-image-pack-accent) 26%, transparent);
-    border-radius: 20px;
-    background:
-        radial-gradient(
-            circle at 86% 10%,
-            color-mix(in srgb, var(--cpd-color-bg-decorative-1, #e4deff) 76%, transparent) 0,
-            transparent 38%
-        ),
-        linear-gradient(
-            135deg,
-            color-mix(in srgb, var(--mx-image-pack-accent) 8%, var(--mx-image-pack-canvas)) 0%,
-            var(--mx-image-pack-canvas) 70%
-        );
-}
-
-.mx_ImagePacksHero::after {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    content: "";
-    background: linear-gradient(
-        110deg,
-        transparent 30%,
-        color-mix(in srgb, var(--mx-image-pack-accent) 6%, transparent) 100%
-    );
-}
-
-.mx_ImagePacksHero_copy,
-.mx_ImagePacksHero_meta {
-    position: relative;
-    z-index: 1;
-}
-
-.mx_ImagePacksHero_copy {
-    max-width: 560px;
-}
-
 .mx_ImagePacksEyebrow {
     display: inline-block;
     margin-bottom: 8px;
@@ -92,7 +44,6 @@ Please see LICENSE files in the repository root for full details.
     text-transform: uppercase;
 }
 
-.mx_ImagePacksHero h2,
 .mx_ImagePacksSection h3,
 .mx_ImagePacksPanel h4,
 .mx_ImagePacksDiscovery h4 {
@@ -101,95 +52,12 @@ Please see LICENSE files in the repository root for full details.
     font-family: var(--cpd-font-family-sans, Inter, ui-sans-serif, system-ui, sans-serif);
 }
 
-.mx_ImagePacksHero h2 {
-    max-width: 480px;
-    font-size: clamp(28px, 4vw, 42px);
-    font-weight: 750;
-    letter-spacing: -0.04em;
-    line-height: 1.03;
-}
-
-.mx_ImagePacksHero p {
-    max-width: 520px;
-    margin: 14px 0 0;
-    color: var(--mx-image-pack-muted);
-    font-size: 15px;
-    line-height: 1.55;
-}
-
-.mx_ImagePacksHero_meta {
-    display: flex;
-    flex-shrink: 0;
-    align-items: flex-end;
-    gap: 18px;
-}
-
-.mx_ImagePacksHero_stats {
-    display: flex;
-    gap: 14px;
-}
-
-.mx_ImagePacksHero_stats span {
-    display: flex;
-    min-width: 62px;
-    flex-direction: column;
-    gap: 2px;
-    padding-left: 14px;
-    border-left: 1px solid color-mix(in srgb, var(--mx-image-pack-accent) 25%, transparent);
-}
-
-.mx_ImagePacksHero_stats strong {
-    font-size: 22px;
-    font-weight: 750;
-    letter-spacing: -0.03em;
-}
-
-.mx_ImagePacksHero_stats small {
-    color: var(--mx-image-pack-muted);
-    font-size: 11px;
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.mx_ImagePacksHero_orbit {
-    position: absolute;
-    right: 5%;
-    top: -38px;
-    width: 170px;
-    height: 170px;
-    border: 1px solid color-mix(in srgb, var(--mx-image-pack-accent) 18%, transparent);
-    border-radius: 50%;
-    box-shadow:
-        0 0 0 18px color-mix(in srgb, var(--mx-image-pack-accent) 5%, transparent),
-        0 0 0 40px color-mix(in srgb, var(--mx-image-pack-accent) 3%, transparent);
-    transform: rotate(18deg);
-}
-
-.mx_ImagePacksHero_orbit::before,
-.mx_ImagePacksHero_orbit::after {
-    position: absolute;
-    width: 13px;
-    height: 13px;
-    border-radius: 4px;
-    content: "";
-    transform: rotate(12deg);
-}
-
-.mx_ImagePacksHero_orbit::before {
-    right: 18px;
-    top: 28px;
-    background: var(--cpd-color-bg-decorative-1, #b7a9ff);
-}
-
-.mx_ImagePacksHero_orbit::after {
-    bottom: 8px;
-    left: 30px;
-    background: var(--cpd-color-bg-decorative-3, #7dd3fc);
-}
-
 .mx_ImagePacksSection {
     margin-top: 40px;
+}
+
+.mx_ImagePacksTab > .mx_ImagePacksSection:first-of-type {
+    margin-top: 0;
 }
 
 .mx_ImagePacksSection_heading {
@@ -673,6 +541,31 @@ Please see LICENSE files in the repository root for full details.
     margin-top: 14px;
 }
 
+.mx_ImagePacksPanel_uploadRow {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--mx-image-pack-border-subtle);
+}
+
+.mx_ImagePacksPanel_fileField {
+    flex: 0 1 280px;
+}
+
+.mx_ImagePacksPanel_fileField input {
+    padding: 6px 8px;
+    font-size: 12px;
+}
+
+.mx_ImagePacksPanel_uploadHint {
+    padding-bottom: 10px;
+    color: var(--mx-image-pack-muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
 .mx_ImagePacksPanel_formIntro {
     display: flex;
     flex-direction: column;
@@ -804,24 +697,6 @@ Please see LICENSE files in the repository root for full details.
 }
 
 @media (max-width: 720px) {
-    .mx_ImagePacksHero {
-        align-items: flex-start;
-        flex-direction: column;
-        min-height: 0;
-        padding: 24px;
-    }
-
-    .mx_ImagePacksHero_meta {
-        width: 100%;
-        align-items: center;
-        justify-content: space-between;
-    }
-
-    .mx_ImagePacksHero_orbit {
-        right: -20px;
-        top: -55px;
-    }
-
     .mx_ImagePacksSection_heading {
         flex-direction: column;
         gap: 10px;
@@ -856,24 +731,6 @@ Please see LICENSE files in the repository root for full details.
     .mx_ImagePacksTab {
         padding-right: 0;
         padding-left: 0;
-    }
-
-    .mx_ImagePacksHero {
-        border-radius: 14px;
-        padding: 20px;
-    }
-
-    .mx_ImagePacksHero_meta {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .mx_ImagePacksHero_stats {
-        width: 100%;
-    }
-
-    .mx_ImagePacksHero_stats span {
-        flex: 1;
     }
 
     .mx_ImagePacksPanel_toolbar {
@@ -920,6 +777,16 @@ Please see LICENSE files in the repository root for full details.
         margin-right: 14px;
         margin-left: 14px;
         padding: 13px;
+    }
+
+    .mx_ImagePacksPanel_uploadRow {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 7px;
+    }
+
+    .mx_ImagePacksPanel_uploadHint {
+        padding-bottom: 0;
     }
 
     .mx_ImagePacksPanel_formFields,

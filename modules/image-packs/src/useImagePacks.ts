@@ -36,12 +36,15 @@ import {
 import type { DiscoverySource, EmoteDefinition, ImagePackDefinition } from "./types.ts";
 
 export type ImagePackMediaUrl = (mxcUrl: string, width: number, height: number) => string | undefined;
+export type ImagePackUpload = (file: File) => Promise<string>;
 
 export interface UseImagePacksOptions {
     client: PackStoreClient & ResolverClient;
     writers: PackWriters;
     /** Optional host media resolver used to turn MXC URIs into thumbnail URLs. */
     getImageUrl?: ImagePackMediaUrl;
+    /** Optional host uploader used by the emote form to turn image files into MXC URIs. */
+    uploadImage?: ImagePackUpload;
     /** Optional room context. When set, room-scoped packs are exposed too. */
     room?: ResolverRoom | null;
     /** Optional list of canonical space ancestors (most recent last). */
@@ -60,6 +63,7 @@ export interface ImagePackView {
 
 export interface UseImagePacksResult {
     getImageUrl?: ImagePackMediaUrl;
+    uploadImage?: ImagePackUpload;
     packs: ImagePackView[];
     sources: DiscoverySource[];
     loading: boolean;
@@ -119,7 +123,7 @@ const emptyRoom = (): ResolverRoom => ({
 });
 
 export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
-    const { client, writers, room, spaceAncestors, getImageUrl } = opts;
+    const { client, writers, room, spaceAncestors, getImageUrl, uploadImage } = opts;
     const [packs, setPacks] = useState<ImagePackView[]>([]);
     const [sources, setSources] = useState<DiscoverySource[]>([]);
     const [loading, setLoading] = useState(false);
@@ -163,6 +167,7 @@ export function useImagePacks(opts: UseImagePacksOptions): UseImagePacksResult {
 
     return {
         getImageUrl,
+        uploadImage,
         packs,
         sources,
         loading,

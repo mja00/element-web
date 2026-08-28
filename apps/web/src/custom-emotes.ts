@@ -929,6 +929,12 @@ export async function removeUserPackEmote(client: MatrixClient, shortcode: strin
     });
 }
 
+export async function uploadImageFromClient(client: MatrixClient, file: File): Promise<string> {
+    const { content_uri: contentUri } = await client.uploadContent(file);
+    if (!contentUri) throw new Error("The homeserver did not return a media URL.");
+    return contentUri;
+}
+
 /**
  * Bridge a live `MatrixClient` to the `PackWriters` contract expected by the
  * `image-packs` module. This is the only place outside the module that

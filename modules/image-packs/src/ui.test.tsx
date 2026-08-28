@@ -115,6 +115,7 @@ describe("ImagePacksSettings", () => {
         render(<ImagePacksSettings api={api} roomId="!room:example.org" />);
 
         expect(screen.getByTestId("image-packs-tab")).toBeTruthy();
+        expect(screen.queryByText("Make every message yours")).toBeNull();
         expect(screen.getByText("Personal & global packs")).toBeTruthy();
         expect(screen.getByText("Room packs")).toBeTruthy();
         expect(screen.getByText("Image-pack discovery sources")).toBeTruthy();
@@ -135,6 +136,26 @@ describe("ImagePacksSettings", () => {
 });
 
 describe("PackListPanel", () => {
+    it("uploads an image before adding an emote", async () => {
+        const user = userEvent.setup();
+        const file = new File(["image"], "wave.png", { type: "image/png" });
+        const uploadImage = vi.fn().mockResolvedValue("mxc://example.org/uploaded");
+        const api = makeApi({ packs: [personalPack], uploadImage });
+
+        render(<PackListPanel api={api} onlyUserScope />);
+
+        const personal = screen.getByTestId("pack-personal");
+        await user.type(within(personal).getByRole("textbox", { name: "Shortcode" }), "uploaded_wave");
+        await user.upload(within(personal).getByLabelText("Upload image"), file);
+        await user.click(within(personal).getByRole("button", { name: "Add emote" }));
+
+        expect(uploadImage).toHaveBeenCalledWith(file);
+        expect(api.addUserEmote).toHaveBeenCalledWith({
+            shortcode: "uploaded_wave",
+            url: "mxc://example.org/uploaded",
+        });
+    });
+
     it("renders resolved media thumbnails and falls back when one cannot load", () => {
         const api = makeApi({
             packs: [personalPack],

@@ -16,7 +16,7 @@ import {
     useImagePacks,
     type UseImagePacksOptions,
 } from "@element-hq/element-web-module-image-packs";
-import { createWritersFromClient, runAccountDataTransaction } from "../../../custom-emotes";
+import { createWritersFromClient, runAccountDataTransaction, uploadImageFromClient } from "../../../custom-emotes";
 import { mediaFromMxc } from "../../../customisations/Media";
 import {
     AdminIcon,
@@ -88,6 +88,7 @@ function ImagePacksRoomSettingsTab({ room }: { room: Room }): React.ReactElement
         },
         getImageUrl: (mxcUrl, width, height) =>
             mediaFromMxc(mxcUrl, cli).getThumbnailOfSourceHttp(width, height, "scale") ?? undefined,
+        uploadImage: (file) => uploadImageFromClient(cli, file),
         writers: createWritersFromClient(cli),
         room,
     };

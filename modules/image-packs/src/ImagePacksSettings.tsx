@@ -34,41 +34,9 @@ export function ImagePacksSettings(props: ImagePacksSettingsProps): React.ReactE
 
     const userPacks = api.packs.filter((pack) => pack.scope === "user");
     const roomPacks = roomId ? api.packs.filter((pack) => pack.roomId === roomId && pack.scope !== "user") : [];
-    const totalEmotes = api.packs.reduce((count, pack) => count + Object.keys(pack.pack.images).length, 0);
 
     return (
         <div data-testid="image-packs-tab" className="mx_ImagePacksTab">
-            <header className="mx_ImagePacksHero">
-                <div className="mx_ImagePacksHero_orbit" aria-hidden="true" />
-                <div className="mx_ImagePacksHero_copy">
-                    <span className="mx_ImagePacksEyebrow">Emoji library</span>
-                    <h2>Make every message yours</h2>
-                    <p>
-                        Keep your favourite packs close, tune each room, and discover new expressions without leaving
-                        Element.
-                    </p>
-                </div>
-                <div className="mx_ImagePacksHero_meta">
-                    <div className="mx_ImagePacksHero_stats" aria-label="Image pack summary">
-                        <span>
-                            <strong>{api.packs.length}</strong>
-                            <small>packs</small>
-                        </span>
-                        <span>
-                            <strong>{totalEmotes}</strong>
-                            <small>emotes</small>
-                        </span>
-                    </div>
-                    <button
-                        type="button"
-                        className="mx_ImagePacksButton mx_ImagePacksButton_secondary"
-                        onClick={() => void api.refresh()}
-                        disabled={api.loading}
-                    >
-                        {api.loading ? "Refreshing…" : "Refresh library"}
-                    </button>
-                </div>
-            </header>
             {!hideUserSection ? (
                 <section className="mx_ImagePacksSection" aria-labelledby="image-packs-account-heading">
                     <div className="mx_ImagePacksSection_heading">

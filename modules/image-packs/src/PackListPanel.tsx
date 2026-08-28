@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE files in the repository root for full details.
 */
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 
 import type { ImagePackMediaUrl, UseImagePacksResult } from "./useImagePacks.ts";
 import type { EmoteDefinition, ImagePackDefinition, ImagePackView } from "./types.ts";
@@ -133,6 +133,9 @@ function PackCard(props: {
     const [showAllEmotes, setShowAllEmotes] = useState(false);
     const [newEmote, setNewEmote] = useState<EmoteDefinition>({ shortcode: "", url: "" });
     const [emoteError, setEmoteError] = useState<string | null>(null);
+    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const emoteCount = Object.keys(pack.pack.images).length;
 
     const submitEmote = async (): Promise<void> => {
@@ -141,16 +144,43 @@ function PackCard(props: {
             setEmoteError("Shortcode must be 1-100 characters of letters, digits, hyphens, or underscores.");
             return;
         }
-        if (!isValidMxc(newEmote.url)) {
+        if (imageFile && !api.uploadImage) {
+            setEmoteError("Direct image uploads are not available here. Paste an mxc:// URL instead.");
+            return;
+        }
+        if (imageFile && imageFile.type && !imageFile.type.startsWith("image/")) {
+            setEmoteError("Choose an image file.");
+            return;
+        }
+        if (!imageFile && !isValidMxc(newEmote.url)) {
             setEmoteError("Image URL must be an mxc:// URL.");
             return;
         }
+        let imageUrl = newEmote.url.trim();
         try {
-            if (pack.kind === "personal") await api.addUserEmote(newEmote);
-            else await api.addRoomEmote(pack.roomId, pack.stateKey, newEmote);
+            if (imageFile) {
+                setUploading(true);
+                try {
+                    imageUrl = await api.uploadImage!(imageFile);
+                } catch {
+                    setEmoteError("We couldn’t upload that image. Please try again.");
+                    return;
+                }
+            }
+            if (!isValidMxc(imageUrl)) {
+                setEmoteError("The uploaded file did not return a valid Matrix media URL.");
+                return;
+            }
+            const emote = { ...newEmote, url: imageUrl };
+            if (pack.kind === "personal") await api.addUserEmote(emote);
+            else await api.addRoomEmote(pack.roomId, pack.stateKey, emote);
             setNewEmote({ shortcode: "", url: "" });
+            setImageFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = "";
         } catch {
-            // error already exposed via api.error
+            // Writer errors are already exposed via api.error.
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -277,12 +307,16 @@ function PackCard(props: {
                         />
                     </label>
                     <label className="mx_ImagePacksField mx_ImagePacksField_wide">
-                        <span>Image URL</span>
+                        <span>Image URL {api.uploadImage ? <small>or upload below</small> : null}</span>
                         <input
                             aria-label="Image URL"
                             placeholder="mxc://example.org/media-id"
                             value={newEmote.url}
-                            onChange={(e) => setNewEmote({ ...newEmote, url: e.target.value })}
+                            onChange={(e) => {
+                                setImageFile(null);
+                                if (fileInputRef.current) fileInputRef.current.value = "";
+                                setNewEmote({ ...newEmote, url: e.target.value });
+                            }}
                         />
                     </label>
                     <label className="mx_ImagePacksField">
@@ -296,10 +330,39 @@ function PackCard(props: {
                             onChange={(e) => setNewEmote({ ...newEmote, body: e.target.value })}
                         />
                     </label>
-                    <button type="submit" className="mx_ImagePacksButton mx_ImagePacksButton_primary">
-                        Add emote
+                    <button
+                        type="submit"
+                        className="mx_ImagePacksButton mx_ImagePacksButton_primary"
+                        disabled={uploading}
+                    >
+                        {uploading ? "Uploading…" : "Add emote"}
                     </button>
                 </div>
+                {api.uploadImage ? (
+                    <div className="mx_ImagePacksPanel_uploadRow">
+                        <label className="mx_ImagePacksField mx_ImagePacksPanel_fileField">
+                            <span>
+                                Upload image <small>optional</small>
+                            </span>
+                            <input
+                                ref={fileInputRef}
+                                aria-label="Upload image"
+                                type="file"
+                                accept="image/*"
+                                onChange={(event) => {
+                                    const file = event.target.files?.[0] ?? null;
+                                    setImageFile(file);
+                                    if (file) setNewEmote({ ...newEmote, url: "" });
+                                }}
+                            />
+                        </label>
+                        <span className="mx_ImagePacksPanel_uploadHint" aria-live="polite">
+                            {imageFile
+                                ? `${imageFile.name} will be uploaded when you add the emote.`
+                                : "Choose a file instead of pasting a URL."}
+                        </span>
+                    </div>
+                ) : null}
                 {emoteError ? <span className="mx_ImagePacksPanel_inlineError">{emoteError}</span> : null}
             </form>
         </article>
