@@ -7,7 +7,7 @@ Please see LICENSE files in the repository root for full details.
 
 import React, { useState } from "react";
 
-import type { UseImagePacksResult } from "./useImagePacks.ts";
+import type { ImagePackMediaUrl, UseImagePacksResult } from "./useImagePacks.ts";
 import type { EmoteDefinition, ImagePackDefinition, ImagePackView } from "./types.ts";
 
 interface PackListPanelProps {
@@ -161,7 +161,7 @@ function PackCard(props: {
         >
             <header className="mx_ImagePacksPanel_packHeader">
                 <div className="mx_ImagePacksPanel_packIdentity">
-                    <PackMark pack={pack} />
+                    <PackMark pack={pack} getImageUrl={api.getImageUrl} />
                     <div>
                         <div className="mx_ImagePacksPanel_packTitle">
                             <h4>{pack.displayName}</h4>
@@ -241,6 +241,7 @@ function PackCard(props: {
             </header>
             <EmoteGrid
                 pack={pack.pack}
+                getImageUrl={api.getImageUrl}
                 showAll={showAllEmotes}
                 onToggleShowAll={() => setShowAllEmotes((current) => !current)}
                 onEdit={async (shortcode, body) => {
@@ -305,20 +306,31 @@ function PackCard(props: {
     );
 }
 
-function PackMark({ pack }: { pack: ImagePackView }): React.ReactElement {
-    const labels = Object.keys(pack.pack.images).slice(0, 4);
-    while (labels.length < 4) labels.push(`${pack.kind.slice(0, 1)}${labels.length}`);
+function PackMark({ pack, getImageUrl }: { pack: ImagePackView; getImageUrl?: ImagePackMediaUrl }): React.ReactElement {
+    const entries = Object.entries(pack.pack.images).slice(0, 4);
+    const tiles = Array.from({ length: 4 }, (_, index) => entries[index]);
     return (
         <span className="mx_ImagePacksPackMark" aria-hidden="true">
-            {labels.map((label) => (
-                <span key={label}>{label.slice(0, 2).toUpperCase()}</span>
-            ))}
+            {tiles.map((entry, index) => {
+                const [shortcode, image] = entry ?? [];
+                return (
+                    <MediaThumbnail
+                        key={shortcode ?? `placeholder-${index}`}
+                        url={image?.url}
+                        getImageUrl={getImageUrl}
+                        width={40}
+                        height={40}
+                        fallback={(shortcode ?? `${pack.kind.slice(0, 1)}${index}`).slice(0, 2).toUpperCase()}
+                    />
+                );
+            })}
         </span>
     );
 }
 
 function EmoteGrid(props: {
     pack: ImagePackDefinition;
+    getImageUrl?: ImagePackMediaUrl;
     showAll: boolean;
     onToggleShowAll: () => void;
     onEdit: (shortcode: string, body: string) => Promise<void>;
@@ -337,9 +349,14 @@ function EmoteGrid(props: {
             <ul className="mx_ImagePacksPanel_emotes">
                 {entries.map(([shortcode, image]) => (
                     <li key={shortcode} className="mx_ImagePacksPanel_emote" data-testid={`emote-${shortcode}`}>
-                        <span className="mx_ImagePacksPanel_emoteMark" aria-hidden="true">
-                            {shortcode.slice(0, 2).toUpperCase()}
-                        </span>
+                        <MediaThumbnail
+                            className="mx_ImagePacksPanel_emoteMark"
+                            url={image.url}
+                            getImageUrl={props.getImageUrl}
+                            width={40}
+                            height={40}
+                            fallback={shortcode.slice(0, 2).toUpperCase()}
+                        />
                         <div className="mx_ImagePacksPanel_emoteCopy">
                             <code>:{shortcode}:</code>
                             <span>{image.body || "No alt text"}</span>
@@ -403,6 +420,36 @@ function EmoteGrid(props: {
                 </button>
             ) : null}
         </div>
+    );
+}
+
+function MediaThumbnail(props: {
+    className?: string;
+    url?: string;
+    getImageUrl?: ImagePackMediaUrl;
+    width: number;
+    height: number;
+    fallback: string;
+}): React.ReactElement {
+    const [failedUrl, setFailedUrl] = useState<string>();
+    const resolvedUrl =
+        props.url && props.getImageUrl ? props.getImageUrl(props.url, props.width, props.height) : undefined;
+    const showImage = Boolean(resolvedUrl && resolvedUrl !== failedUrl);
+
+    return (
+        <span className={props.className} aria-hidden="true">
+            {showImage ? (
+                <img
+                    src={resolvedUrl}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    onError={() => setFailedUrl(resolvedUrl)}
+                />
+            ) : (
+                props.fallback
+            )}
+        </span>
     );
 }
 

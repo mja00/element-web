@@ -135,6 +135,21 @@ describe("ImagePacksSettings", () => {
 });
 
 describe("PackListPanel", () => {
+    it("renders resolved media thumbnails with initials as a fallback", () => {
+        const api = makeApi({
+            packs: [personalPack],
+            getImageUrl: (url, width, height) =>
+                `https://media.example/${encodeURIComponent(url)}?w=${width}&h=${height}`,
+        });
+
+        render(<PackListPanel api={api} onlyUserScope />);
+
+        const images = screen.getByTestId("pack-personal").querySelectorAll("img");
+        expect(images).toHaveLength(2);
+        expect(images[0]?.getAttribute("src")).toBe(`https://media.example/${encodeURIComponent(emote.url)}?w=40&h=40`);
+        expect(images[1]?.getAttribute("src")).toBe(`https://media.example/${encodeURIComponent(emote.url)}?w=40&h=40`);
+    });
+
     it("renders errors and an empty state", () => {
         const api = makeApi({ error: "Something failed" });
         render(<PackListPanel api={api} />);

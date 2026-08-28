@@ -61,7 +61,7 @@ export {
     readDiscoverySources,
     DiscoverySourceError,
 } from "./discovery.ts";
-export type { UseImagePacksOptions, UseImagePacksResult, ImagePackView } from "./useImagePacks.ts";
+export type { UseImagePacksOptions, UseImagePacksResult, ImagePackView, ImagePackMediaUrl } from "./useImagePacks.ts";
 export type { AccountDataContentUpdate, AccountDataTransaction, AccountDataTransactionCallback } from "./discovery.ts";
 export type {
     EmoteDefinition,
