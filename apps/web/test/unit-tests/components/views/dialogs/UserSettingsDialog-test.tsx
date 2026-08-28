@@ -115,6 +115,13 @@ describe("<UserSettingsDialog />", () => {
         expect(container.querySelectorAll(".mx_TabbedView_tabLabel")).toMatchSnapshot();
     });
 
+    it("renders image packs tab", () => {
+        const { container } = render(getComponent({ initialTabId: UserTab.ImagePacks }));
+
+        expect(getActiveTabLabel(container)).toEqual("Image packs");
+        expect(screen.getByTestId("image-packs-tab")).toBeInTheDocument();
+    });
+
     it("renders ignored users tab when feature_mjolnir is enabled", () => {
         mockSettingsStore.getValue.mockImplementation((settingName) => settingName === "feature_mjolnir");
         const { getByTestId } = render(getComponent());

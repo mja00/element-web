@@ -96,6 +96,14 @@ describe("<RoomSettingsDialog />", () => {
             expect(container.querySelectorAll(".mx_TabbedView_tabLabel")).toMatchSnapshot();
         });
 
+        it("renders image packs tab", () => {
+            getComponent();
+
+            fireEvent.click(screen.getByText("Image packs"));
+
+            expect(screen.getByTestId("image-packs-tab")).toBeInTheDocument();
+        });
+
         describe("people settings tab", () => {
             it("does not render when disabled and room join rule is not knock", () => {
                 jest.spyOn(room, "getJoinRule").mockReturnValue(JoinRule.Invite);
