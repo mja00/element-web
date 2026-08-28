@@ -61,9 +61,59 @@ export interface AccountDataLike {
     getContent(): unknown;
 }
 
+export interface AccountDataTransaction {
+    get(eventType: string): unknown;
+    set(eventType: string, content: unknown): Promise<unknown>;
+}
+
+export type AccountDataTransactionCallback<T> = (transaction: AccountDataTransaction) => Promise<T> | T;
+
 export interface AccountDataWriter {
     getAccountData(eventType: string): AccountDataLike | null | undefined;
     setAccountData(eventType: string, content: unknown): Promise<unknown>;
+    runAccountDataTransaction?<T>(callback: AccountDataTransactionCallback<T>): Promise<T>;
+}
+
+const DISCOVERY_SOURCE_EVENT_TYPES = [
+    IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
+    IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+    LEGACY_MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
+    LEGACY_MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
+] as const;
+
+const transactionQueues = new WeakMap<object, Promise<unknown>>();
+
+async function runAccountDataTransaction<T>(
+    writer: AccountDataWriter,
+    update: AccountDataTransactionCallback<T>,
+): Promise<T> {
+    if (writer.runAccountDataTransaction) return writer.runAccountDataTransaction(update);
+
+    const previous = transactionQueues.get(writer) ?? Promise.resolve();
+    const operation = previous
+        .catch(() => undefined)
+        .then(async () => {
+            const values = new Map<string, unknown>();
+            const transaction: AccountDataTransaction = {
+                get: (eventType) => {
+                    if (!values.has(eventType)) values.set(eventType, writer.getAccountData(eventType)?.getContent());
+                    return values.get(eventType);
+                },
+                set: async (eventType, content) => {
+                    values.set(eventType, content);
+                    return writer.setAccountData(eventType, content);
+                },
+            };
+            return update(transaction);
+        });
+    transactionQueues.set(
+        writer,
+        operation.then(
+            () => undefined,
+            () => undefined,
+        ),
+    );
+    return operation;
 }
 
 function deriveDisplayName(url: string): string {
@@ -90,9 +140,7 @@ function hasAccountData(writer: AccountDataWriter, eventType: string): boolean {
     return event !== null && event !== undefined && event.getContent() !== undefined;
 }
 
-function readSources(writer: AccountDataWriter, eventType: string): DiscoverySource[] {
-    const event = writer.getAccountData(eventType);
-    const content = event?.getContent();
+function readSourcesFromContent(content: unknown): DiscoverySource[] {
     if (!content || typeof content !== "object") return [];
     const record = content as Record<string, unknown>;
     const list = Array.isArray(record.sources) ? record.sources : Array.isArray(content) ? content : [];
@@ -105,8 +153,8 @@ function readSources(writer: AccountDataWriter, eventType: string): DiscoverySou
     return out;
 }
 
-async function writeSources(writer: AccountDataWriter, eventType: string, sources: DiscoverySource[]): Promise<void> {
-    await writer.setAccountData(eventType, { sources: sources.map(normaliseSource) });
+function readSources(writer: AccountDataWriter, eventType: string): DiscoverySource[] {
+    return readSourcesFromContent(writer.getAccountData(eventType)?.getContent());
 }
 
 /**
@@ -132,34 +180,25 @@ export async function addDiscoverySource(
 ): Promise<DiscoverySource[]> {
     const parsed = sourceSchema.safeParse({ ...source, id: source.id.trim(), url: source.url.trim() });
     if (!parsed.success) throw new DiscoverySourceError(parsed.error.issues[0]?.message ?? "Invalid discovery source.");
-    const current = mergeSources(
-        [
-            IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
-            IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
-            LEGACY_MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
-            LEGACY_MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
-        ].flatMap((eventType) => readSources(writer, eventType)),
-    );
-    const next = [...current.filter((item) => item.id !== parsed.data.id), normaliseSource(parsed.data)];
-    await writeSources(writer, IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, next);
-    return readDiscoverySources(writer);
+    return runAccountDataTransaction(writer, async (transaction) => {
+        const current = mergeSources(
+            DISCOVERY_SOURCE_EVENT_TYPES.flatMap((eventType) => readSourcesFromContent(transaction.get(eventType))),
+        );
+        const next = [...current.filter((item) => item.id !== parsed.data.id), normaliseSource(parsed.data)];
+        await transaction.set(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, { sources: next });
+        return next;
+    });
 }
 
 export async function removeDiscoverySource(writer: AccountDataWriter, sourceId: string): Promise<DiscoverySource[]> {
-    const current = mergeSources(
-        [
-            IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
-            IMAGE_PACK_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
-            LEGACY_MSC2654_DISCOVERY_SOURCES_EVENT_TYPE,
-            LEGACY_MSC2654_DISCOVERY_SOURCES_UNSTABLE_EVENT_TYPE,
-        ].flatMap((eventType) => readSources(writer, eventType)),
-    );
-    await writeSources(
-        writer,
-        IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE,
-        current.filter((s) => s.id !== sourceId),
-    );
-    return readDiscoverySources(writer);
+    return runAccountDataTransaction(writer, async (transaction) => {
+        const current = mergeSources(
+            DISCOVERY_SOURCE_EVENT_TYPES.flatMap((eventType) => readSourcesFromContent(transaction.get(eventType))),
+        );
+        const next = current.filter((s) => s.id !== sourceId);
+        await transaction.set(IMAGE_PACK_DISCOVERY_SOURCES_EVENT_TYPE, { sources: next });
+        return next;
+    });
 }
 
 export interface DiscoveryFetcher {

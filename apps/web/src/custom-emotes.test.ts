@@ -266,6 +266,7 @@ describe("image pack writer helpers", () => {
     function clientWithRoom(
         room: Room,
         initialAccountData: Record<string, Record<string, unknown>> = {},
+        delayAccountDataWrites = false,
     ): MatrixClient {
         const accountData: Record<string, Record<string, unknown>> = { ...initialAccountData };
         const stateEventsByKey: Record<string, Record<string, MatrixEvent>> = {};
@@ -296,6 +297,7 @@ describe("image pack writer helpers", () => {
             })),
             sendStateEvent: vi.fn(setStateEvent),
             setAccountData: vi.fn(async (type: string, content: unknown) => {
+                if (delayAccountDataWrites) await new Promise<void>((resolve) => setTimeout(resolve, 0));
                 accountData[type] = content as Record<string, unknown>;
                 return {};
             }),
@@ -511,6 +513,56 @@ describe("image pack writer helpers", () => {
         await disableGlobalPack(client, { roomId: "!g:example.org", stateKey: "k" });
         expect(client.setAccountData).toHaveBeenLastCalledWith(LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE, {
             rooms: {},
+        });
+    });
+
+    it("preserves overlapping account-data updates", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(room, {}, true);
+
+        await Promise.all([
+            enableGlobalPack(client, { roomId: "!g:example.org", stateKey: "one" }),
+            enableGlobalPack(client, { roomId: "!g:example.org", stateKey: "two" }),
+            upsertUserPackEmote(client, { shortcode: "one", url: "mxc://e/one" }),
+            upsertUserPackEmote(client, { shortcode: "two", url: "mxc://e/two" }),
+        ]);
+
+        expect(client.getAccountData(IMAGE_PACK_ROOMS_EVENT_TYPE as never)?.getContent()).toEqual({
+            rooms: { "!g:example.org": { one: {}, two: {} } },
+        });
+        expect(client.getAccountData(LEGACY_USER_IMAGE_PACK_EVENT_TYPE as never)?.getContent()).toMatchObject({
+            images: {
+                one: { url: "mxc://e/one" },
+                two: { url: "mxc://e/two" },
+            },
+        });
+    });
+
+    it("preserves overlapping room order updates", async () => {
+        const room = mkStubRoom("!r:example.org", "R");
+        const client = clientWithRoom(
+            room,
+            {
+                [ROOM_IMAGE_PACK_ORDER_EVENT_TYPE]: {
+                    rooms: {
+                        "!one:example.org": ["old-one"],
+                        "!two:example.org": ["old-two"],
+                    },
+                },
+            },
+            true,
+        );
+
+        await Promise.all([
+            reorderRoomImagePacks(client, "!one:example.org", ["new-one"]),
+            reorderRoomImagePacks(client, "!two:example.org", ["new-two"]),
+        ]);
+
+        expect(client.getAccountData(ROOM_IMAGE_PACK_ORDER_EVENT_TYPE as never)?.getContent()).toEqual({
+            rooms: {
+                "!one:example.org": ["new-one"],
+                "!two:example.org": ["new-two"],
+            },
         });
     });
 

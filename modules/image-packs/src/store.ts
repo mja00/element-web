@@ -11,6 +11,7 @@ import {
     readDiscoverySources,
     removeDiscoverySource,
     type AccountDataWriter,
+    type AccountDataTransactionCallback,
 } from "./discovery.ts";
 import { LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY, SHORTCODE_REGEX } from "./types.ts";
 import type { DiscoverySource, EmoteDefinition, ImagePackDefinition } from "./types.ts";
@@ -44,6 +45,7 @@ export interface PackStoreClient {
     getUserId(): string | null;
     getAccountData(eventType: string): { getContent(): unknown } | null | undefined;
     setAccountData(eventType: string, content: unknown): Promise<unknown>;
+    runAccountDataTransaction?<T>(callback: AccountDataTransactionCallback<T>): Promise<T>;
 }
 
 export interface RoomPackDraft {
@@ -187,10 +189,14 @@ export async function deleteUserPack(writers: PackWriters): Promise<void> {
 }
 
 function asAccountDataWriter(client: PackStoreClient): AccountDataWriter {
-    return {
+    const writer: AccountDataWriter = {
         getAccountData: (eventType) => client.getAccountData(eventType),
         setAccountData: (eventType, content) => client.setAccountData(eventType, content),
     };
+    if (client.runAccountDataTransaction) {
+        writer.runAccountDataTransaction = client.runAccountDataTransaction.bind(client);
+    }
+    return writer;
 }
 
 export function listDiscoverySources(client: PackStoreClient): DiscoverySource[] {

@@ -16,7 +16,7 @@ import {
     useImagePacks,
     type UseImagePacksOptions,
 } from "@element-hq/element-web-module-image-packs";
-import { createWritersFromClient } from "../../../custom-emotes";
+import { createWritersFromClient, runAccountDataTransaction } from "../../../custom-emotes";
 import {
     AdminIcon,
     GroupIcon,
@@ -83,6 +83,7 @@ function ImagePacksRoomSettingsTab({ room }: { room: Room }): React.ReactElement
                 return ev ? { getContent: () => ev.getContent() } : null;
             },
             setAccountData: (type: string, content: unknown) => cli.setAccountData(type as never, content as never),
+            runAccountDataTransaction: (callback) => runAccountDataTransaction(cli, callback),
         },
         writers: createWritersFromClient(cli),
         room,

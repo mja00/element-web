@@ -30,7 +30,7 @@ import {
     useImagePacks,
     type UseImagePacksOptions,
 } from "@element-hq/element-web-module-image-packs";
-import { createWritersFromClient } from "../../../custom-emotes";
+import { createWritersFromClient, runAccountDataTransaction } from "../../../custom-emotes";
 import { ModuleApi } from "../../../modules/Api";
 import { _t, _td } from "../../../languageHandler";
 import SettingsTab from "../settings/tabs/SettingsTab";
@@ -130,6 +130,7 @@ function ImagePacksUserSettingsTab({ sdkContext }: { sdkContext: SDKContextClass
                 return ev ? { getContent: () => ev.getContent() } : null;
             },
             setAccountData: (type: string, content: unknown) => cli.setAccountData(type as never, content as never),
+            runAccountDataTransaction: (callback) => runAccountDataTransaction(cli, callback),
         },
         writers: createWritersFromClient(cli),
     };

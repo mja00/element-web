@@ -21,12 +21,15 @@ import type { AccountDataWriter } from "./discovery.ts";
 class FakeWriter implements AccountDataWriter {
     private store = new Map<string, Record<string, unknown>>();
 
+    public constructor(private readonly delayWrites = false) {}
+
     public getAccountData(eventType: string): { getContent(): Record<string, unknown> | undefined } {
         const content = this.store.get(eventType);
         return { getContent: () => content };
     }
 
     public async setAccountData(eventType: string, content: unknown): Promise<unknown> {
+        if (this.delayWrites) await new Promise<void>((resolve) => setTimeout(resolve, 0));
         this.store.set(eventType, content as Record<string, unknown>);
         return {};
     }
@@ -86,6 +89,19 @@ describe("image-pack discovery sources", () => {
         });
         const list = await addDiscoverySource(writer, { id: "new", url: "https://example.org/new.json" });
         expect(list.map((source) => source.id).sort()).toEqual(["new", "old"]);
+    });
+
+    it("preserves concurrent source additions", async () => {
+        const writer = new FakeWriter(true);
+        await Promise.all([
+            addDiscoverySource(writer, { id: "a", url: "https://example.org/a.json" }),
+            addDiscoverySource(writer, { id: "b", url: "https://example.org/b.json" }),
+        ]);
+        expect(
+            readDiscoverySources(writer)
+                .map((source) => source.id)
+                .sort(),
+        ).toEqual(["a", "b"]);
     });
 
     it("fills missing pack metadata from the discovery index", () => {
