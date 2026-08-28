@@ -5,8 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE files in the repository root for full details.
 */
 
-@import "@vector-im/compound-web/dist/style.css" layer(compound-layer);
-
+/* Keep this sheet self-contained because constructable stylesheets cannot resolve package-style imports. */
 .mx_ImagePacksTab {
     --mx-image-pack-accent: var(--cpd-color-text-action-accent, #5e5ce6);
     --mx-image-pack-accent-strong: var(--cpd-color-bg-action-primary-rest, #4f46e5);
