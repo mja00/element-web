@@ -404,5 +404,3 @@ export function CustomEmoteInfo({ mxEvent, room, ...imageProps }: CustomEmoteInf
         </>
     );
 }
-
-export default CustomEmoteInfo;

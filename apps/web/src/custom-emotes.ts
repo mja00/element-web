@@ -301,10 +301,6 @@ function getLegacyUserImagePack(client: MatrixClient): ResolvedImagePack | null 
     };
 }
 
-export function getUserImagePack(client: MatrixClient): ResolvedImagePack | null {
-    return getLegacyUserImagePack(client);
-}
-
 function getGlobalPackReferences(client: MatrixClient): Array<[roomId: string, stateKey: string]> {
     const references = new Set<string>();
     const result: Array<[string, string]> = [];

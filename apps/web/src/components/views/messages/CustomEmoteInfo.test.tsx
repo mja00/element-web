@@ -15,7 +15,7 @@ import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { getMockClientWithEventEmitter, mkStubRoom } from "test-utils";
 import * as customEmotes from "../../../custom-emotes";
 import { LEGACY_USER_IMAGE_PACK_EVENT_TYPE } from "../../../custom-emotes";
-import CustomEmoteInfo from "./CustomEmoteInfo";
+import { CustomEmoteInfo } from "./CustomEmoteInfo";
 
 describe("CustomEmoteInfo", () => {
     const roomId = "!room:example.org";
