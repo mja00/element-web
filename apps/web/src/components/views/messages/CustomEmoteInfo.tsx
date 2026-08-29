@@ -40,16 +40,17 @@ function getRawFormattedBodies(mxEvent: MatrixEvent | undefined): string[] {
         "formatted_body"?: unknown;
         "m.new_content"?: { formatted_body?: unknown };
     };
-    return [content.formatted_body, content["m.new_content"]?.formatted_body].filter(
+    // Edited messages render m.new_content, so inspect it before the original fallback body.
+    return [content["m.new_content"]?.formatted_body, content.formatted_body].filter(
         (formattedBody): formattedBody is string => typeof formattedBody === "string",
     );
 }
 
 /** Read the original MXC from the event without trusting the sanitized message DOM. */
 export function getRawCustomEmoteMxc(mxEvent: MatrixEvent | undefined, shortcode: string): string | undefined {
-    const mxcs = new Set<string>();
-    let hasInvalidSource = false;
     for (const formattedBody of getRawFormattedBodies(mxEvent)) {
+        const mxcs = new Set<string>();
+        let hasInvalidSource = false;
         const parsed = new DOMParser().parseFromString(formattedBody, "text/html");
         for (const image of parsed.querySelectorAll<HTMLImageElement>("img[data-mx-emoticon]")) {
             if (image.title !== shortcode) continue;
@@ -57,9 +58,13 @@ export function getRawCustomEmoteMxc(mxEvent: MatrixEvent | undefined, shortcode
             if (src?.startsWith("mxc://")) mxcs.add(src);
             else hasInvalidSource = true;
         }
+
+        if (mxcs.size > 0 || hasInvalidSource) {
+            return !hasInvalidSource && mxcs.size === 1 ? mxcs.values().next().value : undefined;
+        }
     }
 
-    return !hasInvalidSource && mxcs.size === 1 ? mxcs.values().next().value : undefined;
+    return undefined;
 }
 
 interface OpenEmote {

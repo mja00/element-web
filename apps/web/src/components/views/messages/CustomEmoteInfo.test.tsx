@@ -15,7 +15,7 @@ import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { getMockClientWithEventEmitter, mkStubRoom } from "test-utils";
 import * as customEmotes from "../../../custom-emotes";
 import { LEGACY_USER_IMAGE_PACK_EVENT_TYPE } from "../../../custom-emotes";
-import { CustomEmoteInfo } from "./CustomEmoteInfo";
+import { CustomEmoteInfo, getRawCustomEmoteMxc } from "./CustomEmoteInfo";
 
 describe("CustomEmoteInfo", () => {
     const roomId = "!room:example.org";
@@ -48,6 +48,29 @@ describe("CustomEmoteInfo", () => {
 
     afterEach(() => {
         vi.restoreAllMocks();
+    });
+
+    it("uses the replacement body when an edit changes an emote media URL", () => {
+        const replacementMxcUrl = "mxc://example.org/replacement-wave";
+        const editedEvent = new MatrixEvent({
+            type: "m.room.message",
+            room_id: roomId,
+            sender: "@sender:example.org",
+            content: {
+                "body": ":wave:",
+                "msgtype": "m.text",
+                "format": "org.matrix.custom.html",
+                "formatted_body": `<img data-mx-emoticon="" src="${mxcUrl}" title="wave">`,
+                "m.new_content": {
+                    body: ":wave:",
+                    msgtype: "m.text",
+                    format: "org.matrix.custom.html",
+                    formatted_body: `<img data-mx-emoticon="" src="${replacementMxcUrl}" title="wave">`,
+                },
+            },
+        });
+
+        expect(getRawCustomEmoteMxc(editedEvent, "wave")).toBe(replacementMxcUrl);
     });
 
     it("resolves packs only when the emote is opened and closes when the viewport moves", () => {
