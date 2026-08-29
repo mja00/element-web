@@ -60,5 +60,8 @@ test.describe("Custom emotes", () => {
             `<img data-mx-emoticon="" src="${emoteUrl}" alt="A friendly wave" title="wave" height="32">`,
         );
         await expect(page.locator('.mx_EventTile_last img[data-mx-emoticon][title="wave"]')).toBeVisible();
+        await page.locator('img[data-mx-emoticon][title="wave"]').click();
+        await expect(page.getByRole("dialog", { name: /custom emotes/i })).toBeVisible();
+        await expect(page.getByText(":wave:", { exact: true })).toBeVisible();
     });
 });

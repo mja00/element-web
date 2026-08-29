@@ -34,7 +34,8 @@ export const ROOM_IMAGE_PACK_ORDER_EVENT_TYPE = "org.element.image_pack_order";
 export const LEGACY_ROOM_IMAGE_PACK_ORDER_STATE_KEY = "_order";
 
 const MAX_CANONICAL_SPACE_DEPTH = 20;
-const SHORTCODE_PATTERN = "[A-Za-z0-9_-]{1,100}";
+export const SHORTCODE_PATTERN = "[A-Za-z0-9_-]{1,100}";
+export const SHORTCODE_REGEX = new RegExp(`^${SHORTCODE_PATTERN}$`);
 const CUSTOM_EMOTE_TOKEN = new RegExp(`:(${SHORTCODE_PATTERN})(?:/(${SHORTCODE_PATTERN}))?:`, "g");
 
 interface AccountDataTransactionState {
@@ -298,6 +299,10 @@ function getLegacyUserImagePack(client: MatrixClient): ResolvedImagePack | null 
         source: "user",
         content,
     };
+}
+
+export function getUserImagePack(client: MatrixClient): ResolvedImagePack | null {
+    return getLegacyUserImagePack(client);
 }
 
 function getGlobalPackReferences(client: MatrixClient): Array<[roomId: string, stateKey: string]> {
@@ -962,6 +967,8 @@ export async function deleteUserImagePack(client: MatrixClient): Promise<void> {
  * Add or update a single emote in the user's personal image pack.
  */
 export async function upsertUserPackEmote(client: MatrixClient, emote: EmoteEdit): Promise<void> {
+    if (!SHORTCODE_REGEX.test(emote.shortcode)) throw new Error("Invalid custom emote shortcode");
+    if (!emote.url.startsWith("mxc://")) throw new Error("Invalid custom emote media URL");
     await runAccountDataTransaction(client, async (transaction) => {
         await transaction.set(LEGACY_USER_IMAGE_PACK_EVENT_TYPE, (existingContent) => {
             const hasPack =
@@ -973,6 +980,12 @@ export async function upsertUserPackEmote(client: MatrixClient, emote: EmoteEdit
             );
         });
     });
+}
+
+/** Check the synchronized personal pack before allowing a shortcode collision. */
+export function hasUserPackEmote(client: MatrixClient, shortcode: string): boolean {
+    const content = client.getAccountData(LEGACY_USER_IMAGE_PACK_EVENT_TYPE as never)?.getContent();
+    return Boolean(readUserPackContent(content).images[shortcode]);
 }
 
 /**
