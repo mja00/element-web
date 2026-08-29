@@ -369,8 +369,9 @@ export function CustomEmoteInfo({ mxEvent, room, ...imageProps }: CustomEmoteInf
         if (room?.client) {
             try {
                 const resolved = getCustomEmotesForRoom(room.client, room);
-                // Match only the shortcode so getImagePacksForRoom's trust order remains authoritative.
-                if (mxcUrl) emote = resolved.find((candidate) => candidate.shortcode === shortcode);
+                if (mxcUrl) {
+                    emote = resolved.find((candidate) => candidate.shortcode === shortcode && candidate.url === mxcUrl);
+                }
             } catch {
                 // Rendering the card is still useful when room state is unavailable during a sync transition.
             }

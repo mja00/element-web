@@ -81,6 +81,31 @@ describe("CustomEmoteInfo", () => {
         expect(screen.queryByRole("dialog")).toBeNull();
     });
 
+    it("does not attribute a pack when the shortcode uses a different media URL", () => {
+        const pack: customEmotes.ResolvedImagePack = {
+            roomId,
+            stateKey: "room-emotes",
+            displayName: "Wrong pack",
+            source: "room",
+            content: { images: { wave: { url: "mxc://example.org/other-wave" } } },
+        };
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([
+            {
+                shortcode: "wave",
+                url: "mxc://example.org/other-wave",
+                pack,
+                packSlug: "room-emotes",
+                sendToken: ":wave:",
+            },
+        ]);
+        render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
+
+        fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+
+        expect(screen.queryByText("Wrong pack")).toBeNull();
+        expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("wave");
+    });
+
     it("requires a valid, non-colliding shortcode before adding an unattributed emote", () => {
         vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([]);
         render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
