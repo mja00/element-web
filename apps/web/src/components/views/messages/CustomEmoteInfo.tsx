@@ -47,8 +47,8 @@ function getRawFormattedBodies(mxEvent: MatrixEvent | undefined): string[] {
     );
 }
 
-/** Read the original MXC from the event without trusting the sanitized message DOM. */
-export function getRawCustomEmoteMxc(mxEvent: MatrixEvent | undefined, shortcode: string): string | undefined {
+/** Read the original MXCs for a shortcode without trusting the sanitized message DOM. */
+export function getRawCustomEmoteMxcs(mxEvent: MatrixEvent | undefined, shortcode: string): string[] {
     for (const formattedBody of getRawFormattedBodies(mxEvent)) {
         const mxcs = new Set<string>();
         let hasInvalidSource = false;
@@ -61,10 +61,35 @@ export function getRawCustomEmoteMxc(mxEvent: MatrixEvent | undefined, shortcode
         }
 
         if (mxcs.size > 0 || hasInvalidSource) {
-            return !hasInvalidSource && mxcs.size === 1 ? mxcs.values().next().value : undefined;
+            return hasInvalidSource ? [] : [...mxcs];
         }
     }
 
+    return [];
+}
+
+/** Read the original MXC from the event without trusting the sanitized message DOM. */
+export function getRawCustomEmoteMxc(mxEvent: MatrixEvent | undefined, shortcode: string): string | undefined {
+    const mxcs = getRawCustomEmoteMxcs(mxEvent, shortcode);
+    return mxcs.length === 1 ? mxcs[0] : undefined;
+}
+
+/**
+ * Attribute a click to one MXC when several packs share a shortcode in one message.
+ * Falls back to `undefined` (unknown provenance) when the clicked image cannot be matched.
+ */
+export function resolveRawCustomEmoteMxc(
+    mxEvent: MatrixEvent | undefined,
+    shortcode: string,
+    clickedSrc: string | undefined,
+    toHttpSrc: (mxc: string) => string | null,
+): string | undefined {
+    const rawMxcs = getRawCustomEmoteMxcs(mxEvent, shortcode);
+    if (rawMxcs.length === 1) return rawMxcs[0];
+    if (rawMxcs.length > 1 && clickedSrc) {
+        const matches = rawMxcs.filter((mxc) => mxc === clickedSrc || toHttpSrc(mxc) === clickedSrc);
+        if (matches.length === 1) return matches[0];
+    }
     return undefined;
 }
 
@@ -412,7 +437,24 @@ export function CustomEmoteInfo({ mxEvent, room, ...imageProps }: CustomEmoteInf
 
         // Keep one card open so a transparent ContextMenu background does not leave stale cards behind.
         activeCustomEmoteClose?.();
-        const mxcUrl = getRawCustomEmoteMxc(mxEvent, shortcode);
+        const client = room?.client;
+        const toHttpSrc = (mxc: string): string | null => {
+            if (!client) return null;
+            try {
+                return mediaFromMxc(mxc, client).srcHttp;
+            } catch {
+                // An unresolvable MXC simply cannot disambiguate the click.
+                return null;
+            }
+        };
+        // The sanitizer renders emote MXCs as HTTP, so the clicked image source
+        // identifies which pack a shared shortcode came from.
+        const mxcUrl = resolveRawCustomEmoteMxc(
+            mxEvent,
+            shortcode,
+            typeof imageProps.src === "string" ? imageProps.src : undefined,
+            toHttpSrc,
+        );
         let emote: CustomEmote | undefined;
         if (room?.client) {
             try {

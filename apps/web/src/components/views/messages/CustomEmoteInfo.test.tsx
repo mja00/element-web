@@ -15,10 +15,16 @@ import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
 import { getMockClientWithEventEmitter, mkStubRoom } from "test-utils";
 import * as customEmotes from "../../../custom-emotes";
 import { IMAGE_PACK_ROOMS_EVENT_TYPE, LEGACY_USER_IMAGE_PACK_EVENT_TYPE } from "../../../custom-emotes";
+import * as MediaModule from "../../../customisations/Media";
 import dis from "../../../dispatcher/dispatcher";
 import { Action } from "../../../dispatcher/actions";
 import { UserTab } from "../dialogs/UserTab";
-import { CustomEmoteInfo, getRawCustomEmoteMxc } from "./CustomEmoteInfo";
+import {
+    CustomEmoteInfo,
+    getRawCustomEmoteMxc,
+    getRawCustomEmoteMxcs,
+    resolveRawCustomEmoteMxc,
+} from "./CustomEmoteInfo";
 
 describe("CustomEmoteInfo", () => {
     const roomId = "!room:example.org";
@@ -86,7 +92,95 @@ describe("CustomEmoteInfo", () => {
         });
 
         expect(getRawCustomEmoteMxc(malformedEvent, "wave")).toBeUndefined();
+        expect(getRawCustomEmoteMxcs(malformedEvent, "wave")).toEqual([]);
         expect(getRawCustomEmoteMxc(undefined, "wave")).toBeUndefined();
+        expect(getRawCustomEmoteMxcs(undefined, "wave")).toEqual([]);
+    });
+
+    it("lists every media URL when packs share a shortcode in one message", () => {
+        const otherMxcUrl = "mxc://example.org/other-wave";
+        const sharedEvent = new MatrixEvent({
+            type: "m.room.message",
+            room_id: roomId,
+            content: {
+                formatted_body:
+                    `<img data-mx-emoticon="" src="${mxcUrl}" title="wave">` +
+                    `<img data-mx-emoticon="" src="${otherMxcUrl}" title="wave">`,
+            },
+        });
+
+        expect(getRawCustomEmoteMxcs(sharedEvent, "wave")).toEqual([mxcUrl, otherMxcUrl]);
+        // A bare shortcode lookup stays ambiguous without the clicked image.
+        expect(getRawCustomEmoteMxc(sharedEvent, "wave")).toBeUndefined();
+    });
+
+    it("attributes a shared shortcode to the clicked image source", () => {
+        const otherMxcUrl = "mxc://example.org/other-wave";
+        const otherSrcHttp = "https://example.org/_matrix/client/v3/media/download/example.org/other-wave";
+        const sharedEvent = new MatrixEvent({
+            type: "m.room.message",
+            room_id: roomId,
+            content: {
+                formatted_body:
+                    `<img data-mx-emoticon="" src="${mxcUrl}" title="wave">` +
+                    `<img data-mx-emoticon="" src="${otherMxcUrl}" title="wave">`,
+            },
+        });
+        const toHttpSrc = (mxc: string): string | null =>
+            mxc === mxcUrl ? srcHttp : mxc === otherMxcUrl ? otherSrcHttp : null;
+
+        expect(resolveRawCustomEmoteMxc(sharedEvent, "wave", otherSrcHttp, toHttpSrc)).toBe(otherMxcUrl);
+        expect(resolveRawCustomEmoteMxc(sharedEvent, "wave", srcHttp, toHttpSrc)).toBe(mxcUrl);
+        expect(resolveRawCustomEmoteMxc(sharedEvent, "wave", "https://example.org/unknown", toHttpSrc)).toBeUndefined();
+        expect(resolveRawCustomEmoteMxc(sharedEvent, "wave", undefined, toHttpSrc)).toBeUndefined();
+        expect(resolveRawCustomEmoteMxc(sharedEvent, "wave", otherSrcHttp, () => null)).toBeUndefined();
+    });
+
+    it("opens the pack of the clicked image when packs share a shortcode", () => {
+        const otherMxcUrl = "mxc://example.org/other-wave";
+        const otherSrcHttp = "https://example.org/_matrix/client/v3/media/download/example.org/other-wave";
+        const sharedEvent = new MatrixEvent({
+            type: "m.room.message",
+            room_id: roomId,
+            sender: "@sender:example.org",
+            content: {
+                body: ":wave: :wave:",
+                msgtype: "m.text",
+                format: "org.matrix.custom.html",
+                formatted_body:
+                    `<img data-mx-emoticon="" src="${mxcUrl}" alt="Wave A" title="wave">` +
+                    `<img data-mx-emoticon="" src="${otherMxcUrl}" alt="Wave B" title="wave">`,
+            },
+        });
+        const packA: customEmotes.ResolvedImagePack = {
+            roomId,
+            stateKey: "pack-a",
+            displayName: "Pack A",
+            source: "room",
+            content: { images: { wave: { url: mxcUrl } } },
+        };
+        const packB: customEmotes.ResolvedImagePack = {
+            roomId,
+            stateKey: "pack-b",
+            displayName: "Pack B",
+            source: "room",
+            content: { images: { wave: { url: otherMxcUrl } } },
+        };
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([
+            { shortcode: "wave", url: mxcUrl, pack: packA, packSlug: "pack-a", sendToken: ":wave/pack-a:" },
+            { shortcode: "wave", url: otherMxcUrl, pack: packB, packSlug: "pack-b", sendToken: ":wave/pack-b:" },
+        ]);
+        vi.spyOn(MediaModule, "mediaFromMxc").mockImplementation(
+            (mxc?: string) =>
+                ({ srcHttp: mxc === mxcUrl ? srcHttp : mxc === otherMxcUrl ? otherSrcHttp : null }) as never,
+        );
+
+        render(<CustomEmoteInfo mxEvent={sharedEvent} room={room} src={otherSrcHttp} title="wave" alt="Wave B" />);
+        fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+
+        expect(screen.getByText("Pack B")).toBeInTheDocument();
+        expect(screen.queryByText("Pack A")).toBeNull();
+        expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
     });
 
     it("resolves packs only when the emote is opened and closes when the viewport moves", () => {
