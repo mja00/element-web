@@ -14,7 +14,7 @@ import { act, fireEvent, render, screen, waitFor } from "test-utils-rtl";
 
 import { getMockClientWithEventEmitter, mkStubRoom } from "test-utils";
 import * as customEmotes from "../../../custom-emotes";
-import { LEGACY_USER_IMAGE_PACK_EVENT_TYPE } from "../../../custom-emotes";
+import { IMAGE_PACK_ROOMS_EVENT_TYPE, LEGACY_USER_IMAGE_PACK_EVENT_TYPE } from "../../../custom-emotes";
 import dis from "../../../dispatcher/dispatcher";
 import { Action } from "../../../dispatcher/actions";
 import { UserTab } from "../dialogs/UserTab";
@@ -357,7 +357,7 @@ describe("CustomEmoteInfo", () => {
             { shortcode: "wave", url: mxcUrl, pack, packSlug: "room-emotes", sendToken: ":wave:" },
         ]);
         vi.mocked(client.getAccountData).mockImplementation((eventType) =>
-            eventType === "m.image_pack.rooms"
+            (eventType as string) === IMAGE_PACK_ROOMS_EVENT_TYPE
                 ? new MatrixEvent({ type: eventType, content: { rooms: { [roomId]: { "room-emotes": {} } } } })
                 : undefined,
         );
