@@ -848,6 +848,20 @@ function readRoomsContent(content: unknown): Record<string, Record<string, objec
 }
 
 /**
+ * Whether the given pack is already referenced for global use in either the
+ * stable or legacy account-data keys.
+ */
+export function isGlobalPackEnabled(client: MatrixClient, reference: GlobalPackReference): boolean {
+    for (const eventType of [IMAGE_PACK_ROOMS_EVENT_TYPE, LEGACY_IMAGE_PACK_ROOMS_EVENT_TYPE]) {
+        const content = client.getAccountData(eventType as never)?.getContent();
+        if (!isRecord(content) || !isRecord(content.rooms)) continue;
+        const packs = content.rooms[reference.roomId];
+        if (isRecord(packs) && reference.stateKey in packs) return true;
+    }
+    return false;
+}
+
+/**
  * Add (or update) a reference from the user's `m.image_pack.rooms` account
  * data so the referenced pack becomes globally available. Writes the
  * stable key and mirrors into the legacy `im.ponies.emote_rooms` key for

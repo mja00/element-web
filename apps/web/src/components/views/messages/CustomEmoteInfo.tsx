@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Com
 Please see LICENSE files in the repository root for full details.
 */
 
-import React, { type JSX, type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import React, { type JSX, type MouseEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { type MatrixEvent, type Room } from "matrix-js-sdk/src/matrix";
 
 import { _t } from "../../../languageHandler";
@@ -16,6 +16,7 @@ import {
     enableGlobalPack,
     getCustomEmotesForRoom,
     hasUserPackEmote,
+    isGlobalPackEnabled,
     removeUserPackEmote,
     SHORTCODE_PATTERN,
     SHORTCODE_REGEX,
@@ -104,6 +105,7 @@ function PersonalPackAction({
     client: NonNullable<Room["client"]> | undefined;
     onFinished: () => void;
 }): JSX.Element {
+    const inputId = useId();
     const [shortcode, setShortcode] = useState(openEmote.shortcode);
     const [operation, setOperation] = useState<Operation>("idle");
     const [isInPersonalPack, setIsInPersonalPack] = useState(() =>
@@ -113,6 +115,7 @@ function PersonalPackAction({
     const shortcodeRef = useRef(shortcode);
     const validShortcode = SHORTCODE_REGEX.test(shortcode);
     const hasCollision = isInPersonalPack;
+    const hasUnknownMedia = !openEmote.mxcUrl;
     const canWrite = Boolean(client && openEmote.mxcUrl && validShortcode && !hasCollision);
 
     useEffect(() => {
@@ -163,11 +166,11 @@ function PersonalPackAction({
 
     return (
         <div className="mx_CustomEmoteInfo_personalPack" dir="auto">
-            <label className="mx_CustomEmoteInfo_shortcodeLabel" htmlFor="mx_CustomEmoteInfo_shortcode">
+            <label className="mx_CustomEmoteInfo_shortcodeLabel" htmlFor={inputId}>
                 {_t("common|name")}
             </label>
             <input
-                id="mx_CustomEmoteInfo_shortcode"
+                id={inputId}
                 className="mx_CustomEmoteInfo_shortcode"
                 value={shortcode}
                 onChange={(event) => {
@@ -180,9 +183,18 @@ function PersonalPackAction({
                 autoComplete="off"
                 disabled={operation === "saving" || operation === "removing"}
             />
-            {!validShortcode ? <div className="mx_CustomEmoteInfo_error">{_t("common|error")}</div> : null}
-            {hasCollision ? <div className="mx_CustomEmoteInfo_error">{_t("common|error")}</div> : null}
-            {operation === "error" ? <div className="mx_CustomEmoteInfo_error">{_t("common|error")}</div> : null}
+            {!validShortcode ? (
+                <div className="mx_CustomEmoteInfo_error">{_t("common|custom_emote_name_invalid")}</div>
+            ) : null}
+            {hasCollision ? (
+                <div className="mx_CustomEmoteInfo_error">{_t("common|custom_emote_name_in_use")}</div>
+            ) : null}
+            {hasUnknownMedia ? (
+                <div className="mx_CustomEmoteInfo_error">{_t("common|custom_emote_media_unknown")}</div>
+            ) : null}
+            {operation === "error" ? (
+                <div className="mx_CustomEmoteInfo_error">{_t("common|custom_emote_save_failed")}</div>
+            ) : null}
             {operation === "saved" || (isInPersonalPack && operation !== "removing") ? (
                 <div className="mx_CustomEmoteInfo_status">{_t("common|saved")}</div>
             ) : null}
@@ -235,7 +247,28 @@ function CustomEmoteInfoCard({
             // A malformed pack avatar should not prevent the emote details from opening.
         }
     }
-    const packEnabled = pack && pack.source !== "room" && pack.source !== "space";
+    const [globallyEnabled, setGloballyEnabled] = useState(() =>
+        client && pack ? isGlobalPackEnabled(client, { roomId: pack.roomId, stateKey: pack.stateKey }) : false,
+    );
+
+    useEffect(() => {
+        if (!client || !pack) return;
+        const reference = { roomId: pack.roomId, stateKey: pack.stateKey };
+        setGloballyEnabled(isGlobalPackEnabled(client, reference));
+        return subscribeToImagePackChanges(client, () => {
+            setGloballyEnabled(isGlobalPackEnabled(client, reference));
+        });
+    }, [client, pack]);
+
+    let previewSrc: string | null | undefined = openEmote.srcHttp;
+    if (!previewSrc && openEmote.mxcUrl) {
+        try {
+            previewSrc = mediaFromMxc(openEmote.mxcUrl, client).srcHttp;
+        } catch {
+            previewSrc = null;
+        }
+    }
+    const packEnabled = pack && (pack.source !== "room" && pack.source !== "space" ? true : globallyEnabled);
     const [enableOperation, setEnableOperation] = useState<Operation>("idle");
 
     const openSettings = (): void => {
@@ -268,13 +301,15 @@ function CustomEmoteInfoCard({
         >
             <div className="mx_CustomEmoteInfo_content" dir="auto">
                 <div className="mx_CustomEmoteInfo_focusTarget" tabIndex={-1} aria-hidden="true" />
-                <img
-                    className="mx_CustomEmoteInfo_preview"
-                    src={openEmote.srcHttp}
-                    alt={truncate(openEmote.body || openEmote.shortcode)}
-                    width={48}
-                    height={48}
-                />
+                {previewSrc ? (
+                    <img
+                        className="mx_CustomEmoteInfo_preview"
+                        src={previewSrc}
+                        alt={truncate(openEmote.body || openEmote.shortcode)}
+                        width={48}
+                        height={48}
+                    />
+                ) : null}
                 <div className="mx_CustomEmoteInfo_shortcode">:{truncate(openEmote.shortcode)}:</div>
                 {openEmote.body ? (
                     <div className="mx_CustomEmoteInfo_description" title={truncate(openEmote.body)}>
@@ -325,7 +360,7 @@ function CustomEmoteInfoCard({
                     <div className="mx_CustomEmoteInfo_status">{_t("common|saved")}</div>
                 ) : null}
                 {enableOperation === "error" ? (
-                    <div className="mx_CustomEmoteInfo_error">{_t("common|error")}</div>
+                    <div className="mx_CustomEmoteInfo_error">{_t("common|custom_emote_save_failed")}</div>
                 ) : null}
             </div>
         </ContextMenu>
@@ -342,11 +377,19 @@ export function CustomEmoteInfo({ mxEvent, room, ...imageProps }: CustomEmoteInf
     useEffect(() => {
         if (!openEmote) return;
         const closeOnViewportChange = (): void => close();
+        const closeOnPointerDown = (event: PointerEvent): void => {
+            const target = event.target as HTMLElement | null;
+            if (triggerRef.current?.contains(target)) return;
+            if (target?.closest?.(".mx_CustomEmoteInfo")) return;
+            close();
+        };
         window.addEventListener("scroll", closeOnViewportChange, true);
         window.addEventListener("resize", closeOnViewportChange);
+        document.addEventListener("pointerdown", closeOnPointerDown, true);
         return () => {
             window.removeEventListener("scroll", closeOnViewportChange, true);
             window.removeEventListener("resize", closeOnViewportChange);
+            document.removeEventListener("pointerdown", closeOnPointerDown, true);
         };
     }, [close, openEmote]);
 
@@ -401,7 +444,7 @@ export function CustomEmoteInfo({ mxEvent, room, ...imageProps }: CustomEmoteInf
                 aria-haspopup="dialog"
                 aria-expanded={Boolean(openEmote)}
             >
-                <img {...imageProps} alt={imageProps.alt ?? ""} />
+                <img {...imageProps} alt="" aria-hidden="true" />
             </button>
             {openEmote && triggerRef.current ? (
                 <CustomEmoteInfoCard openEmote={openEmote} room={room} anchor={triggerRef.current} onFinished={close} />

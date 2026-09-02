@@ -240,7 +240,7 @@ describe("CustomEmoteInfo", () => {
         render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
         fireEvent.click(screen.getByRole("button", { name: /Enable Custom emotes/ }));
-        await waitFor(() => expect(screen.getByText("Error")).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText("Could not save. Try again.")).toBeInTheDocument());
     });
 
     it("requires a valid, non-colliding shortcode before adding an unattributed emote", () => {
@@ -255,6 +255,7 @@ describe("CustomEmoteInfo", () => {
         fireEvent.change(input, { target: { value: "wave/room" } });
         expect(input).toHaveAttribute("aria-invalid", "true");
         expect(add).toBeDisabled();
+        expect(screen.getByText("Use letters, numbers, _ and -, up to 100 characters.")).toBeInTheDocument();
 
         const accountEvent = new MatrixEvent({
             type: LEGACY_USER_IMAGE_PACK_EVENT_TYPE,
@@ -263,6 +264,7 @@ describe("CustomEmoteInfo", () => {
         vi.mocked(client.getAccountData).mockReturnValue(accountEvent);
         fireEvent.change(input, { target: { value: "wave" } });
         expect(add).toBeDisabled();
+        expect(screen.getByText("This name is already in your personal pack.")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: /remove wave/i })).toBeInTheDocument();
     });
 
@@ -273,7 +275,7 @@ describe("CustomEmoteInfo", () => {
 
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
         fireEvent.click(screen.getByRole("button", { name: /Add/ }));
-        await waitFor(() => expect(screen.getByText("Error")).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText("Could not save. Try again.")).toBeInTheDocument());
         expect(screen.queryByText("Saved")).toBeNull();
     });
 
@@ -313,6 +315,107 @@ describe("CustomEmoteInfo", () => {
         render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
         fireEvent.click(screen.getByRole("button", { name: /Remove wave/i }));
-        await waitFor(() => expect(screen.getByText("Error")).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByText("Could not save. Try again.")).toBeInTheDocument());
+    });
+
+    it("closes on outside pointerdown but ignores presses inside the card or trigger", () => {
+        const pack: customEmotes.ResolvedImagePack = {
+            roomId,
+            stateKey: "room-emotes",
+            displayName: "Room emotes",
+            source: "room",
+            content: { images: { wave: { url: mxcUrl } } },
+        };
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([
+            { shortcode: "wave", url: mxcUrl, pack, packSlug: "room-emotes", sendToken: ":wave:" },
+        ]);
+        render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
+
+        const trigger = screen.getByRole("button", { name: ":wave:" });
+        fireEvent.click(trigger);
+        expect(screen.queryByRole("dialog")).not.toBeNull();
+
+        fireEvent.pointerDown(trigger);
+        expect(screen.queryByRole("dialog")).not.toBeNull();
+
+        fireEvent.pointerDown(screen.getByText("Room emotes"));
+        expect(screen.queryByRole("dialog")).not.toBeNull();
+
+        fireEvent.pointerDown(document.body);
+        expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("shows settings instead of enable when a room pack is already globally enabled", () => {
+        const pack: customEmotes.ResolvedImagePack = {
+            roomId,
+            stateKey: "room-emotes",
+            displayName: "Room emotes",
+            source: "room",
+            content: { images: { wave: { url: mxcUrl } } },
+        };
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([
+            { shortcode: "wave", url: mxcUrl, pack, packSlug: "room-emotes", sendToken: ":wave:" },
+        ]);
+        vi.mocked(client.getAccountData).mockImplementation((eventType) =>
+            eventType === "m.image_pack.rooms"
+                ? new MatrixEvent({ type: eventType, content: { rooms: { [roomId]: { "room-emotes": {} } } } })
+                : undefined,
+        );
+
+        render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
+        fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+
+        expect(screen.queryByRole("button", { name: /Enable Custom emotes/ })).toBeNull();
+        expect(screen.getByRole("button", { name: /Open Custom emotes/ })).toBeInTheDocument();
+    });
+
+    it("explains unrecognised media and disables saving", () => {
+        const malformedEvent = new MatrixEvent({
+            type: "m.room.message",
+            room_id: roomId,
+            content: {
+                formatted_body: `<img data-mx-emoticon="" src="https://example.org/wave" title="wave">`,
+            },
+        });
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([]);
+        render(<CustomEmoteInfo mxEvent={malformedEvent} room={room} src={srcHttp} title="wave" alt="wave" />);
+
+        fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+
+        expect(screen.getByText("Unrecognised emote media, so it cannot be saved.")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Add/ })).toBeDisabled();
+    });
+
+    it("hides the preview when no emote source is available", () => {
+        const malformedEvent = new MatrixEvent({
+            type: "m.room.message",
+            room_id: roomId,
+            content: {
+                formatted_body: `<img data-mx-emoticon="" src="https://example.org/wave" title="wave">`,
+            },
+        });
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([]);
+        render(<CustomEmoteInfo mxEvent={malformedEvent} room={room} title="wave" alt="wave" />);
+
+        fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+
+        expect(screen.getByRole("dialog").querySelector(".mx_CustomEmoteInfo_preview")).toBeNull();
+    });
+
+    it("associates the name field uniquely and hides the trigger image from assistive tech", () => {
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([]);
+        const { container } = render(
+            <CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />,
+        );
+
+        const triggerImage = container.querySelector(".mx_CustomEmoteInfo_trigger img");
+        expect(triggerImage).toHaveAttribute("alt", "");
+        expect(triggerImage).toHaveAttribute("aria-hidden", "true");
+
+        fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+        const input = screen.getByRole("textbox", { name: "Name" });
+        const label = screen.getByText("Name", { selector: "label" });
+        expect(input.id).toBeTruthy();
+        expect(label.getAttribute("for")).toBe(input.id);
     });
 });
