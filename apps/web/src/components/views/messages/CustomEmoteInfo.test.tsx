@@ -19,12 +19,7 @@ import * as MediaModule from "../../../customisations/Media";
 import dis from "../../../dispatcher/dispatcher";
 import { Action } from "../../../dispatcher/actions";
 import { UserTab } from "../dialogs/UserTab";
-import {
-    CustomEmoteInfo,
-    getRawCustomEmoteMxc,
-    getRawCustomEmoteMxcs,
-    resolveRawCustomEmoteMxc,
-} from "./CustomEmoteInfo";
+import { CustomEmoteInfo, getRawCustomEmoteMxcs, resolveRawCustomEmoteMxc } from "./CustomEmoteInfo";
 
 describe("CustomEmoteInfo", () => {
     const roomId = "!room:example.org";
@@ -79,7 +74,7 @@ describe("CustomEmoteInfo", () => {
             },
         });
 
-        expect(getRawCustomEmoteMxc(editedEvent, "wave")).toBe(replacementMxcUrl);
+        expect(getRawCustomEmoteMxcs(editedEvent, "wave")).toEqual([replacementMxcUrl]);
     });
 
     it("ignores malformed or missing raw emote media", () => {
@@ -91,9 +86,7 @@ describe("CustomEmoteInfo", () => {
             },
         });
 
-        expect(getRawCustomEmoteMxc(malformedEvent, "wave")).toBeUndefined();
         expect(getRawCustomEmoteMxcs(malformedEvent, "wave")).toEqual([]);
-        expect(getRawCustomEmoteMxc(undefined, "wave")).toBeUndefined();
         expect(getRawCustomEmoteMxcs(undefined, "wave")).toEqual([]);
     });
 
@@ -111,7 +104,7 @@ describe("CustomEmoteInfo", () => {
 
         expect(getRawCustomEmoteMxcs(sharedEvent, "wave")).toEqual([mxcUrl, otherMxcUrl]);
         // A bare shortcode lookup stays ambiguous without the clicked image.
-        expect(getRawCustomEmoteMxc(sharedEvent, "wave")).toBeUndefined();
+        expect(resolveRawCustomEmoteMxc(sharedEvent, "wave", undefined, () => null)).toBeUndefined();
     });
 
     it("attributes a shared shortcode to the clicked image source", () => {

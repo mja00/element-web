@@ -47,7 +47,7 @@ function getRawFormattedBodies(mxEvent: MatrixEvent | undefined): string[] {
     );
 }
 
-/** Read the original MXCs for a shortcode without trusting the sanitized message DOM. */
+/** Read the original MXC from the event without trusting the sanitized message DOM. */
 export function getRawCustomEmoteMxcs(mxEvent: MatrixEvent | undefined, shortcode: string): string[] {
     for (const formattedBody of getRawFormattedBodies(mxEvent)) {
         const mxcs = new Set<string>();
@@ -66,12 +66,6 @@ export function getRawCustomEmoteMxcs(mxEvent: MatrixEvent | undefined, shortcod
     }
 
     return [];
-}
-
-/** Read the original MXC from the event without trusting the sanitized message DOM. */
-export function getRawCustomEmoteMxc(mxEvent: MatrixEvent | undefined, shortcode: string): string | undefined {
-    const mxcs = getRawCustomEmoteMxcs(mxEvent, shortcode);
-    return mxcs.length === 1 ? mxcs[0] : undefined;
 }
 
 /**
