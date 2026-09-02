@@ -182,7 +182,7 @@ describe("CustomEmoteInfo", () => {
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
 
         expect(screen.getByText(scope, { selector: ".mx_CustomEmoteInfo_packScope" })).toBeInTheDocument();
-        expect(screen.getByTitle("Pack author", { selector: ".mx_CustomEmoteInfo_attribution" })).toHaveTextContent(
+        expect(screen.getByRole("dialog").querySelector(".mx_CustomEmoteInfo_attribution")).toHaveTextContent(
             "Pack author",
         );
         expect(

@@ -15,7 +15,7 @@ const EMOTE_IMAGE = readSampleFileSync("riot.png", null);
 test.describe("Custom emotes", () => {
     test.use({
         displayName: "Emote Tester",
-        room: async ({ app }, use) => {
+        room: async ({ app, user: _user }, use) => {
             const roomId = await app.client.createRoom({ name: "Custom emotes" });
             await use({ roomId });
         },
@@ -38,11 +38,22 @@ test.describe("Custom emotes", () => {
             },
             "room-emotes",
         );
+        await expect
+            .poll(() =>
+                app.client.evaluate(
+                    (client, roomId) =>
+                        Boolean(
+                            client.getRoom(roomId)?.currentState.getStateEvents("m.room.image_pack", "room-emotes"),
+                        ),
+                    room.roomId,
+                ),
+            )
+            .toBe(true);
 
         await page.goto(`#/room/${room.roomId}`);
         const composer = page.getByRole("textbox", { name: "Send an unencrypted message…" });
         await composer.fill(":wav");
-        await expect(page.getByText(":wave:", { exact: true })).toBeVisible();
+        await expect(page.locator("img.mx_Autocomplete_Completion_customEmote")).toBeVisible();
         await composer.fill(":wave:");
 
         const sendRequestPromise = page.waitForRequest(
@@ -61,7 +72,8 @@ test.describe("Custom emotes", () => {
         );
         await expect(page.locator('.mx_EventTile_last img[data-mx-emoticon][title="wave"]')).toBeVisible();
         await page.locator('img[data-mx-emoticon][title="wave"]').click();
-        await expect(page.getByRole("dialog", { name: /custom emotes/i })).toBeVisible();
-        await expect(page.getByText(":wave:", { exact: true })).toBeVisible();
+        const popover = page.locator(".mx_CustomEmoteInfo");
+        await expect(popover).toBeVisible();
+        await expect(popover.getByText(":wave:", { exact: true })).toBeVisible();
     });
 });
