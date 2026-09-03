@@ -175,20 +175,24 @@ jobs:
                   vars: |
                       PLATFORMS=linux/amd64,linux/arm64
 
+            # NOTE: digests are resolved per-tag via imagetools instead of the
+            # bake-action `metadata` output. That output embeds SLSA provenance
+            # including the full push payload, so on large merges it exceeds the
+            # 128 KiB exec env limit and the step fails with "Argument list too
+            # long" before bash even starts.
             - name: Sign the images with GitHub OIDC Token
               env:
-                  METADATA: ${{ steps.build-and-push.outputs.metadata }}
                   TAGS: ${{ steps.meta.outputs.tags }}
                   TAGS_MODULES: ${{ steps.meta-modules.outputs.tags }}
               if: github.event_name != 'pull_request'
               run: |
                   images=""
                   sign_target() {
-                      digest=$(echo "$METADATA" | jq -er --arg t "$1" '.[$t]."containerimage.digest"')
-                      for tag in $2; do
+                      for tag in $1; do
+                          digest=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -er .digest)
                           images+="${tag}@${digest} "
                       done
                   }
-                  sign_target element-web "$TAGS"
-                  sign_target element-web-modules "$TAGS_MODULES"
+                  sign_target "$TAGS"
+                  sign_target "$TAGS_MODULES"
                   cosign sign --yes ${images}
