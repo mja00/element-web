@@ -130,6 +130,11 @@ function PersonalPackAction({
     const [isInPersonalPack, setIsInPersonalPack] = useState(() =>
         client ? hasUserPackEmote(client, openEmote.shortcode) : false,
     );
+    // Emotes already in the personal pack skip the gate: removing or renaming is
+    // the likely intent, so start with the form visible.
+    const [expanded, setExpanded] = useState(isInPersonalPack);
+    const shouldFocusInput = useRef(false);
+    const inputRef = useRef<HTMLInputElement>(null);
     const operationRef = useRef(operation);
     const shortcodeRef = useRef(shortcode);
     const validShortcode = SHORTCODE_REGEX.test(shortcode);
@@ -159,6 +164,18 @@ function PersonalPackAction({
         return subscribeToImagePackChanges(client, update);
     }, [client]);
 
+    useEffect(() => {
+        if (expanded && shouldFocusInput.current) {
+            inputRef.current?.focus();
+            shouldFocusInput.current = false;
+        }
+    }, [expanded]);
+
+    const reveal = (): void => {
+        shouldFocusInput.current = true;
+        setExpanded(true);
+    };
+
     const add = async (): Promise<void> => {
         if (!client || !openEmote.mxcUrl || !validShortcode || hasCollision) return;
         setOperation("saving");
@@ -183,6 +200,20 @@ function PersonalPackAction({
         }
     };
 
+    if (!expanded) {
+        return (
+            <div className="mx_CustomEmoteInfo_personalPack" dir="auto">
+                {hasUnknownMedia ? (
+                    <div className="mx_CustomEmoteInfo_error">{_t("common|custom_emote_media_unknown")}</div>
+                ) : (
+                    <button type="button" className="mx_CustomEmoteInfo_addToggle" onClick={reveal}>
+                        {_t("action|add")} {_t("common|custom_emotes")}
+                    </button>
+                )}
+            </div>
+        );
+    }
+
     return (
         <div className="mx_CustomEmoteInfo_personalPack" dir="auto">
             <label className="mx_CustomEmoteInfo_shortcodeLabel" htmlFor={inputId}>
@@ -191,6 +222,7 @@ function PersonalPackAction({
             <input
                 id={inputId}
                 className="mx_CustomEmoteInfo_shortcode"
+                ref={inputRef}
                 value={shortcode}
                 onChange={(event) => {
                     setShortcode(event.target.value);

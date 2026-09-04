@@ -235,6 +235,7 @@ describe("CustomEmoteInfo", () => {
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
 
         expect(screen.queryByText("Wrong pack")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: /Add Custom emotes/ }));
         expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("wave");
     });
 
@@ -335,6 +336,7 @@ describe("CustomEmoteInfo", () => {
         render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
 
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+        fireEvent.click(screen.getByRole("button", { name: /Add Custom emotes/ }));
         const input = screen.getByRole("textbox", { name: "Name" });
         const add = screen.getByRole("button", { name: /Add/ });
         expect(add).toBeEnabled();
@@ -361,6 +363,7 @@ describe("CustomEmoteInfo", () => {
         render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
 
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+        fireEvent.click(screen.getByRole("button", { name: /Add Custom emotes/ }));
         fireEvent.click(screen.getByRole("button", { name: /Add/ }));
         await waitFor(() => expect(screen.getByText("Could not save. Try again.")).toBeInTheDocument());
         expect(screen.queryByText("Saved")).toBeNull();
@@ -372,6 +375,7 @@ describe("CustomEmoteInfo", () => {
         render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
 
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+        fireEvent.click(screen.getByRole("button", { name: /Add Custom emotes/ }));
         fireEvent.click(screen.getByRole("button", { name: /Add/ }));
         await waitFor(() => expect(client.setAccountData).toHaveBeenCalled());
 
@@ -456,7 +460,7 @@ describe("CustomEmoteInfo", () => {
         expect(screen.getByRole("button", { name: /Open Custom emotes/ })).toBeInTheDocument();
     });
 
-    it("explains unrecognised media and disables saving", () => {
+    it("explains unrecognised media and hides the add flow", () => {
         const malformedEvent = new MatrixEvent({
             type: "m.room.message",
             room_id: roomId,
@@ -470,7 +474,21 @@ describe("CustomEmoteInfo", () => {
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
 
         expect(screen.getByText("Unrecognised emote media, so it cannot be saved.")).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /Add/ })).toBeDisabled();
+        expect(screen.queryByRole("button", { name: /Add/ })).toBeNull();
+    });
+
+    it("keeps the add form collapsed until the user asks for it", () => {
+        vi.spyOn(customEmotes, "getCustomEmotesForRoom").mockReturnValue([]);
+        render(<CustomEmoteInfo mxEvent={event} room={room} src={srcHttp} title="wave" alt="A friendly wave" />);
+
+        fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+
+        expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
+        expect(screen.getByRole("button", { name: /Add Custom emotes/ })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: /Add Custom emotes/ }));
+
+        expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus();
     });
 
     it("hides the preview when no emote source is available", () => {
@@ -498,8 +516,8 @@ describe("CustomEmoteInfo", () => {
         const triggerImage = container.querySelector(".mx_CustomEmoteInfo_trigger img");
         expect(triggerImage).toHaveAttribute("alt", "");
         expect(triggerImage).toHaveAttribute("aria-hidden", "true");
-
         fireEvent.click(screen.getByRole("button", { name: ":wave:" }));
+        fireEvent.click(screen.getByRole("button", { name: /Add Custom emotes/ }));
         const input = screen.getByRole("textbox", { name: "Name" });
         const label = screen.getByText("Name", { selector: "label" });
         expect(input.id).toBeTruthy();
