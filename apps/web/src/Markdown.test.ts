@@ -173,4 +173,30 @@ describe("Markdown parser test", () => {
             expect(md.toHTML()).toEqual(expectedResult);
         });
     });
+
+    describe("blockquotes", () => {
+        it("renders a `>` glued to text verbatim instead of as a blockquote", () => {
+            const md = new Markdown(">:3");
+            expect(md.isPlainText()).toBe(true);
+            expect(md.toHTML()).toEqual("&gt;:3");
+        });
+
+        it("still treats `> text` with a space as a blockquote", () => {
+            const md = new Markdown("> this is a quote");
+            expect(md.isPlainText()).toBe(false);
+            expect(md.toHTML()).toEqual("<blockquote>\n<p>this is a quote</p>\n</blockquote>\n");
+        });
+
+        it("escapes glued `>` on any line, including indented and nested markers", () => {
+            expect(new Markdown("hi\n>:3\n> q").toHTML()).toEqual(
+                "<p>hi<br />&gt;:3</p>\n<blockquote>\n<p>q</p>\n</blockquote>\n",
+            );
+            expect(new Markdown("   >:3").toHTML()).toEqual("&gt;:3");
+            expect(new Markdown(">>nested").toHTML()).toEqual("&gt;&gt;nested");
+        });
+
+        it("keeps applying inline formatting after an escaped `>`", () => {
+            expect(new Markdown(">:3 **bold**").toHTML()).toEqual("&gt;:3 <strong>bold</strong>");
+        });
+    });
 });

@@ -125,6 +125,24 @@ describe("editor/serialize", function () {
             const html = htmlSerializeIfNeeded(model, {});
             expect(html).toBe('<ol start="2021">\n<li>foo</li>\n</ol>\n');
         });
+        it("a leading > glued to text is sent as plaintext, not a blockquote", function () {
+            const pc = createPartCreator();
+            const model = new EditorModel([pc.plain(">:3")], pc);
+            const html = htmlSerializeIfNeeded(model, {});
+            expect(html).toBe(undefined);
+        });
+        it("a leading > followed by a space is still sent as a blockquote", function () {
+            const pc = createPartCreator();
+            const model = new EditorModel([pc.plain("> quote")], pc);
+            const html = htmlSerializeIfNeeded(model, {});
+            expect(html).toBe("<blockquote>\n<p>quote</p>\n</blockquote>\n");
+        });
+        it("a glued > inside a formatted message is kept verbatim in the html body", function () {
+            const pc = createPartCreator();
+            const model = new EditorModel([pc.plain(">:3 **hi**")], pc);
+            const html = htmlSerializeIfNeeded(model, {});
+            expect(html).toBe("&gt;:3 <strong>hi</strong>");
+        });
         describe("with permalink_prefix set", function () {
             const sdkConfigGet = SdkConfig.get;
             beforeEach(() => {
