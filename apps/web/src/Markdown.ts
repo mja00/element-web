@@ -117,7 +117,8 @@ export default class Markdown {
     private parsed: commonmark.Node;
 
     public constructor(input: string) {
-        this.input = input;
+        // Escape a leading `>` glued to text (e.g. ">:3") so it renders verbatim; only "> quote" with a space blockquotes.
+        this.input = input.replace(/^( {0,3})>(?=\S)/gm, "$1\\>");
 
         const parser = new commonmark.Parser();
         this.parsed = parser.parse(this.input);
