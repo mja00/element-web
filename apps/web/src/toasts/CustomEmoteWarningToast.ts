@@ -7,8 +7,8 @@ Please see LICENSE files in the repository root for full details.
 
 import { type Room } from "matrix-js-sdk/src/matrix";
 import { type RoomMessageEventContent } from "matrix-js-sdk/src/types";
+import { GenericToast } from "@element-hq/web-shared-components";
 
-import GenericToast from "../components/views/toasts/GenericToast";
 import { hasCustomEmotes } from "../custom-emotes";
 import { _t } from "../languageHandler";
 import ToastStore from "../stores/ToastStore";

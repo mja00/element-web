@@ -53,11 +53,14 @@ export class CallStore extends AsyncStoreWithClient<EmptyObject> {
     protected async onReady(): Promise<any> {
         if (!this.matrixClient) return;
         // Fetch transports, but don't await the result.
-        this.matrixClient.cachedRtcTransports.wait().catch(() => {
-            if (SdkConfig.get("enable_client_well_known_lookups")) {
-                void this.matrixClient?.waitForClientWellKnown();
-            }
-        });
+        this.matrixClient.cachedRtcTransports
+            .wait()
+            .catch(() => {
+                if (SdkConfig.get("enable_client_well_known_lookups")) {
+                    return this.matrixClient?.waitForClientWellKnown();
+                }
+            })
+            .catch(() => {});
 
         // We assume that the calls present in a room are a function of room
         // widgets and group calls, so we initialize the room map here and then
@@ -223,8 +226,7 @@ export class CallStore extends AsyncStoreWithClient<EmptyObject> {
         const wellKnown = this.matrixClient?.getClientWellKnown();
         const foci = wellKnown?.["org.matrix.msc4143.rtc_foci"];
         if (foci !== undefined) {
-            if (Array.isArray(foci))
-                return foci; // Contents assumed to be valid Transports
+            if (Array.isArray(foci)) return foci; // Contents assumed to be valid Transports
             else logger.warn(`org.matrix.msc4143.rtc_foci is not an array in .well-known`);
         }
         return [];

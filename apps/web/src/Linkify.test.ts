@@ -9,14 +9,15 @@ Please see LICENSE files in the repository root for full details.
 
 // @vitest-environment happy-dom
 
-import sanitizeHtml from "sanitize-html";
+import { sanitizeHtml } from "@element-hq/element-web-shared-utils";
 import { type MatrixClient } from "matrix-js-sdk/src/matrix";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { stubClient } from "test-utils";
 
-import { roomAliasEventListeners, sanitizeHtmlParams, userIdEventListeners } from "./Linkify";
+import { roomAliasEventListeners, sanitizeHtmlParams, transformTags, userIdEventListeners } from "./Linkify";
 import dispatcher from "./dispatcher/dispatcher";
 import { Action } from "./dispatcher/actions";
+import * as permalinkUtils from "./utils/permalinks/Permalinks";
 
 describe("message HTML image sanitization", () => {
     let client: MatrixClient;
@@ -98,5 +99,19 @@ describe("linkify-matrix", () => {
                 }),
             );
         });
+    });
+
+    it("keeps application permalinks local", () => {
+        const permalinkSpy = vi
+            .spyOn(permalinkUtils, "tryTransformPermalinkToLocalHref")
+            .mockReturnValue("#/room/!room:server");
+
+        const result = transformTags.a("a", { href: "https://matrix.to/#/!room:server" });
+
+        expect(result.attribs).toEqual({
+            href: "https://matrix.to/#/!room:server",
+            rel: "noreferrer noopener",
+        });
+        permalinkSpy.mockRestore();
     });
 });

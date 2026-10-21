@@ -120,7 +120,9 @@ export async function sendMessage(
         ...params,
         customEmotes: getCustomEmotesForRoom(mxClient, room),
     });
-    attachUrlPreviews(urlPreviewSnapshot, content, linksIn(message).size !== 0);
+    if (await attachUrlPreviews(mxClient, room, urlPreviewSnapshot, content, linksIn(message).size !== 0)) {
+        return;
+    }
 
     // TODO replace emotion end of message ?
 
@@ -190,11 +192,19 @@ interface EditMessageParams {
     mxClient: MatrixClient;
     roomContext: Pick<IRoomState, "timelineRenderingType">;
     editorStateTransfer: EditorStateTransfer;
+    /**
+     * Function to attach bundles of current URL previews
+     */
+    attachBundles?: (content: RoomMessageEventContent) => Promise<boolean>;
+    /**
+     * whether the list of previews to attach has changed even if the text body is unchanged
+     */
+    isUrlPreviewsModified?: boolean;
 }
 
 export async function editMessage(
     html: string,
-    { roomContext, mxClient, editorStateTransfer }: EditMessageParams,
+    { roomContext, mxClient, editorStateTransfer, attachBundles, isUrlPreviewsModified }: EditMessageParams,
 ): Promise<ISendEventResponse | undefined> {
     const editedEvent = editorStateTransfer.getEvent();
 
@@ -238,7 +248,8 @@ export async function editMessage(
     const roomId = editedEvent.getRoomId();
 
     // If content is modified then send an updated event into the room
-    if (isContentModified(newContent, editorStateTransfer) && roomId) {
+    // either text content or list of URL previews modified counts
+    if ((isContentModified(newContent, editorStateTransfer) || isUrlPreviewsModified) && roomId) {
         // TODO Slash Commands
 
         if (shouldSend) {
@@ -248,8 +259,17 @@ export async function editMessage(
             const event = editorStateTransfer.getEvent();
             const threadId = event.threadRootId || null;
 
+            // the previews are read synchronously, so the editor can be closed straight away
+            // rather than making the user wait for any preview images to upload
+            const attaching = attachBundles?.(newContent);
+            endEditing(roomContext);
+
+            // the edit was cancelled while its preview images were uploading
+            if (await attaching) return;
+
             response = mxClient.sendMessage(roomId, threadId, editContent);
             dis.dispatch({ action: "message_sent" });
+            return response;
         }
     }
 

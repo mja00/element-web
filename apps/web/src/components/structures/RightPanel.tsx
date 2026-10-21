@@ -31,6 +31,7 @@ import TimelineCard from "../views/right_panel/TimelineCard";
 import { UPDATE_EVENT } from "../../stores/AsyncStore";
 import { type IRightPanelCard, type IRightPanelCardState } from "../../stores/right-panel/RightPanelStoreIPanelState";
 import { Action } from "../../dispatcher/actions";
+import { DocumentViewerCard } from "../views/right_panel/DocumentViewerCard";
 import { type XOR } from "../../@types/common";
 import ExtensionsCard from "../views/right_panel/ExtensionsCard";
 import MemberListView from "../views/rooms/MemberList/MemberListView";
@@ -87,6 +88,7 @@ export default class RightPanel extends React.Component<Props, IState> {
     public componentWillUnmount(): void {
         this.context?.removeListener(RoomStateEvent.Members, this.onRoomStateMember);
         RightPanelStore.instance.off(UPDATE_EVENT, this.onRightPanelStoreUpdate);
+        this.delayedUpdate.cancel();
     }
 
     public static getDerivedStateFromProps(props: Props): Partial<IState> {
@@ -275,6 +277,12 @@ export default class RightPanel extends React.Component<Props, IState> {
             case RightPanelPhases.Widget:
                 if (!!this.props.room && !!cardState?.widgetId) {
                     card = <WidgetCard room={this.props.room} widgetId={cardState.widgetId} onClose={this.onClose} />;
+                }
+                break;
+
+            case RightPanelPhases.DocumentViewer:
+                if (!!cardState?.documentViewerEvent) {
+                    card = <DocumentViewerCard mxEvent={cardState.documentViewerEvent} onClose={this.onClose} />;
                 }
                 break;
         }
