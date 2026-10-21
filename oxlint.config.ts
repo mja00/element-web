@@ -47,7 +47,7 @@ export default defineConfig({
         "react-perf",
         "jsx-a11y",
     ],
-    jsPlugins: ["eslint-plugin-element-call"],
+    jsPlugins: ["eslint-plugin-element-call", "eslint-plugin-react-web-api", "eslint-plugin-element-web"],
     categories: {
         correctness: "error",
         perf: "error",
@@ -186,6 +186,18 @@ export default defineConfig({
             "/*\nCopyright %%CURRENT_YEAR%% Element Creations Ltd.\n\nSPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial\nPlease see LICENSE in the repository root for full details.\n*/\n\n",
         ],
 
+        // Catch work which outlives the component, hook or disposable class which started it
+        "element-web/require-lodash-cancel": "error",
+        "element-web/no-subscribe-after-await": "error",
+        "element-web/no-leaked-class-timer": "error",
+        "element-web/no-leaked-emitter-listener": "error",
+        "react-web-api/no-leaked-event-listener": "error",
+        "react-web-api/no-leaked-fetch": "error",
+        "react-web-api/no-leaked-intersection-observer": "error",
+        "react-web-api/no-leaked-interval": "error",
+        "react-web-api/no-leaked-resize-observer": "error",
+        "react-web-api/no-leaked-timeout": "error",
+
         // Allow the use of underscore to show args are not used.
         // This is helpful for seeing that a function implements
         // an interface but won't be using one of it's arguments.
@@ -262,6 +274,16 @@ export default defineConfig({
         "jsx-a11y/media-has-caption": "off",
         "jsx-a11y/no-noninteractive-element-to-interactive-role": "off",
         "jsx-a11y/aria-activedescendant-has-tabindex": "off",
+        "react/set-state-in-effect": "off",
+        "react/no-deriving-state-in-effects": "off",
+        "react/refs": "off",
+        "react/todo": "off",
+        "react/preserve-manual-memoization": "off",
+        "react/exhaustive-effect-dependencies": "off",
+        "react/memo-dependencies": "off",
+        "react/invariant": "off",
+        "react/rule-suppression": "off",
+        "react/incompatible-library": "off",
 
         // Rules within `suspicious` we do not yet comply with but probably should
         "typescript/no-unsafe-type-assertion": "off",
@@ -398,7 +420,7 @@ export default defineConfig({
                             },
                             {
                                 name: "@testing-library/react",
-                                message: "Please use jest-matrix-react instead",
+                                message: "Please use test-utils-rtl instead",
                             },
                             {
                                 name: "matrix-js-sdk",
@@ -518,7 +540,7 @@ export default defineConfig({
         {
             files: [
                 "{packages,apps,modules}/*/src/**/*.{test,stories}.{ts,tsx}",
-                "{packages,apps,modules}/*/src/{tests,test}/*.{ts,tsx}",
+                "{packages,apps,modules}/*/src/{tests,test}/**/*.{ts,tsx}",
                 "{packages,apps,modules}/*/src/**/__mocks__/*.{ts,tsx}",
                 "{packages,apps,modules}/*/{test,playwright,e2e}/**/*",
                 "{packages,apps,modules}/*/playwright.config.ts",
@@ -533,7 +555,6 @@ export default defineConfig({
                 "no-unsafe-optional-chaining": "off",
                 "typescript/no-empty-object-type": "off",
                 "typescript/unbound-method": "off",
-                "typescript/no-floating-promises": "off",
                 "vitest/require-mock-type-parameters": "off",
                 "vitest/no-disabled-tests": "off",
                 "vitest/no-conditional-expect": "off",
@@ -579,6 +600,7 @@ export default defineConfig({
                 "no-new": "off",
                 "react/iframe-missing-sandbox": "off",
                 "promise/no-promise-in-callback": "off",
+                "react/globals": "off",
 
                 // This would be good to enable in the future
                 "typescript/await-thenable": "off",
@@ -610,6 +632,7 @@ export default defineConfig({
             files: ["**/*.{cjs,js}"],
             rules: {
                 "typescript/no-require-imports": "off",
+                "typescript/no-var-requires": "off",
                 "import/no-commonjs": "off",
                 "unicorn/prefer-module": "off",
             },

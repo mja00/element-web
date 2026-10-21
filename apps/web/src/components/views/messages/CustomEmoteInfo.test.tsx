@@ -384,13 +384,17 @@ describe("CustomEmoteInfo", () => {
             content: { images: { wave: { url: mxcUrl } } },
         });
         vi.mocked(client.getAccountData).mockReturnValue(accountEvent);
-        act(() => client.emit(ClientEvent.AccountData, accountEvent));
+        act(() => {
+            client.emit(ClientEvent.AccountData, accountEvent);
+        });
         await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
 
         fireEvent.click(screen.getByRole("button", { name: /Remove wave/i }));
         await waitFor(() => expect(remove).toHaveBeenCalledWith(client, "wave"));
         vi.mocked(client.getAccountData).mockReturnValue(undefined);
-        act(() => client.emit(ClientEvent.AccountData, accountEvent));
+        act(() => {
+            client.emit(ClientEvent.AccountData, accountEvent);
+        });
         await waitFor(() => expect(screen.getByText("Remove")).toBeInTheDocument());
     });
 

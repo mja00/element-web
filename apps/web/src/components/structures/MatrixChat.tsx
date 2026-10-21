@@ -12,22 +12,31 @@ import {
     createClient,
     EventType,
     HttpApiEvent,
+    JoinRule,
     type MatrixClient,
     MatrixEvent,
     MsgType,
+    RestrictedAllowType,
     type RoomType,
     SyncState,
     type SyncStateData,
     type TimelineEvents,
 } from "matrix-js-sdk/src/matrix";
+import { type RoomJoinRulesEventContent } from "matrix-js-sdk/src/types";
 import { logger } from "matrix-js-sdk/src/logger";
 import { throttle } from "lodash";
 import { CryptoEvent, type KeyBackupInfo } from "matrix-js-sdk/src/crypto-api";
 import { TooltipProvider } from "@vector-im/compound-web";
 // what-input helps improve keyboard accessibility
 import "what-input";
-import sanitizeHtml from "sanitize-html";
-import { I18nContext, LinkedTextContext, LinkedText } from "@element-hq/web-shared-components";
+import { copyPlainTextToClipboard, sanitizeHtml } from "@element-hq/element-web-shared-utils";
+import {
+    I18nContext,
+    LinkedTextContext,
+    LinkedText,
+    GenericToast,
+    LegacyCryptoUnsupportedView,
+} from "@element-hq/web-shared-components";
 import { LockSolidIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
 import PosthogTrackers from "../../PosthogTrackers";
@@ -75,7 +84,6 @@ import { UIFeature } from "../../settings/UIFeature";
 import DialPadModal from "../views/voip/DialPadModal";
 import { showToast as showMobileGuideToast } from "../../toasts/MobileGuideToast";
 import { shouldUseLoginForWelcome } from "../../utils/pages";
-import { ModuleRunner } from "../../modules/ModuleRunner";
 import Spinner from "../views/elements/Spinner";
 import QuestionDialog from "../views/dialogs/QuestionDialog";
 import UserSettingsDialog from "../views/dialogs/UserSettingsDialog";
@@ -92,7 +100,6 @@ import VerificationRequestToast from "../views/toasts/VerificationRequestToast";
 import PerformanceMonitor, { PerformanceEntryNames } from "../../performance";
 import UIStore, { UI_EVENTS } from "../../stores/UIStore";
 import SoftLogout from "./auth/SoftLogout";
-import { copyPlaintext } from "../../utils/strings";
 import { initSentry } from "../../sentry";
 import { showSpaceInvite } from "../../utils/space";
 import { type ButtonEvent } from "../views/elements/AccessibleButton";
@@ -117,10 +124,9 @@ import { isLocalRoom } from "../../utils/localRoom/isLocalRoom";
 import { SDKContext } from "../../contexts/SDKContext";
 import { SDKContextClass } from "../../contexts/SDKContextClass.ts";
 import { viewUserDeviceSettings } from "../../actions/handlers/viewUserDeviceSettings";
-import GenericToast from "../views/toasts/GenericToast";
 import RovingSpotlightDialog from "../views/dialogs/spotlight/SpotlightDialog";
 import { findDMForUser } from "../../utils/dm/findDMForUser";
-import { getHtmlText } from "../../HtmlUtils";
+import { sanitizeHtmlText } from "../../HtmlUtils";
 import { NotificationLevel } from "../../stores/notifications/NotificationLevel";
 import { type UserTab } from "../views/dialogs/UserTab";
 import { shouldSkipSetupEncryption } from "../../utils/crypto/shouldSkipSetupEncryption";
@@ -128,6 +134,7 @@ import { Filter } from "../views/dialogs/spotlight/Filter";
 import { SessionLockStolenView } from "./auth/SessionLockStolenView";
 import { ConfirmSessionLockTheftView } from "./auth/ConfirmSessionLockTheftView";
 import { LoginSplashView } from "./auth/LoginSplashView";
+import { LegacyCryptoStoreError } from "../../utils/LegacyCryptoStoreError.ts";
 import { cleanUpDraftsIfRequired } from "../../DraftCleaner";
 import { InitialCryptoSetupStore } from "../../stores/InitialCryptoSetupStore";
 import { setTheme } from "../../theme";
@@ -141,6 +148,7 @@ import { type IScreen } from "../../vector/routing.ts";
 import { type URLParams } from "../../vector/url_utils.ts";
 import { type QrLoginCredentials } from "../views/auth/LoginWithQR.tsx";
 import { configureFromCompletedOAuthLogin } from "../../Lifecycle";
+import { LegacyCryptoUnsupportedViewModel } from "../../viewmodels/crypto/legacyCryptoUnsupportedViewModel.ts";
 
 const AUTH_SCREENS = ["register", "mobile_register", "login", "forgot_password", "start_sso", "start_cas", "welcome"];
 
@@ -229,6 +237,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
 
     private readonly loggedInView = createRef<LoggedInViewType>();
     private dispatcherRef?: string;
+    private blacklistUnverifiedDevicesWatcherRef?: string;
     private themeWatcher?: ThemeWatcher;
     private fontWatcher?: FontWatcher;
     private readonly stores: SDKContextClass;
@@ -291,8 +300,11 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
         const initProm = this.initSession();
 
         initProm.catch((err) => {
-            // TODO: show an error screen, rather than a spinner of doom
             logger.error("Error initialising Matrix session", err);
+
+            if (err instanceof LegacyCryptoStoreError) {
+                this.setState({ view: Views.LEGACY_CRYPTO_UNSUPPORTED });
+            }
         });
     };
 
@@ -432,12 +444,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
             // if the user has previously set up cross-signing, verify this device so we can fetch the
             // private keys.
 
-            const cryptoExtension = ModuleRunner.instance.extensions.cryptoSetup;
-            if (cryptoExtension.SHOW_ENCRYPTION_SETUP_UI == false) {
-                this.onShowPostLoginScreen();
-            } else {
-                this.setStateForNewView({ view: Views.COMPLETE_SECURITY });
-            }
+            this.setStateForNewView({ view: Views.COMPLETE_SECURITY });
         } else if (!(await shouldSkipSetupEncryption(cli))) {
             // if cross-signing is not yet set up, do so now if possible.
             InitialCryptoSetupStore.sharedInstance().startInitialCryptoSetup(
@@ -467,6 +474,8 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
     }
 
     public componentDidMount(): void {
+        // UIStore.destroy() removes all its listeners on unmount
+        // oxlint-disable-next-line element-web/no-leaked-emitter-listener
         UIStore.instance.on(UI_EVENTS.Resize, this.handleResize);
 
         // For PersistentElement
@@ -523,8 +532,12 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
         this.fontWatcher?.stop();
         UIStore.destroy();
         this.stores.resizeNotifier.removeListener("middlePanelResized", this.dispatchTimelineResize);
+        RoomNotificationStateStore.instance.off(UPDATE_STATUS_INDICATOR, this.onUpdateStatusIndicator);
         window.removeEventListener("resize", this.onWindowResized);
-
+        this.warnInConsole.cancel();
+        if (this.blacklistUnverifiedDevicesWatcherRef) {
+            SettingsStore.unwatchSetting(this.blacklistUnverifiedDevicesWatcherRef);
+        }
         DecryptionFailureTracker.instance.stop();
     }
 
@@ -1141,7 +1154,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                         type: "m.room.message",
                         content: {
                             msgtype: MsgType.Text,
-                            body: getHtmlText(msg),
+                            body: sanitizeHtmlText(msg),
                             format: "org.matrix.custom.html",
                             formatted_body: sanitizeHtml(msg, sanitizeHtmlParams),
                         },
@@ -1236,10 +1249,10 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
         const memberCount = roomToLeave?.currentState.getJoinedMemberCount();
         if (memberCount === 1) {
             warnings.push(
-                <strong className="warning" key="only_member_warning">
+                <span key="only_member_warning">
                     {" " /* Whitespace, otherwise the sentences get smashed together */}
                     {_t("leave_room_dialog|last_person_warning")}
-                </strong>,
+                </span>,
             );
 
             return warnings;
@@ -1247,15 +1260,26 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
 
         const joinRules = roomToLeave?.currentState.getStateEvents("m.room.join_rules", "");
         if (joinRules) {
-            const rule = joinRules.getContent().join_rule;
-            if (rule !== "public") {
+            const content = joinRules.getContent<RoomJoinRulesEventContent>();
+            if (content.join_rule !== JoinRule.Public) {
+                const hasAuthorisedSpaces =
+                    content.join_rule === JoinRule.Restricted &&
+                    !!content.allow?.some(({ type }) => type === RestrictedAllowType.RoomMembership);
+                let warning: string;
+                if (isSpace) {
+                    warning = hasAuthorisedSpaces
+                        ? _t("leave_room_dialog|space_rejoin_warning_restricted")
+                        : _t("leave_room_dialog|space_rejoin_warning");
+                } else {
+                    warning = hasAuthorisedSpaces
+                        ? _t("leave_room_dialog|room_rejoin_warning_restricted")
+                        : _t("leave_room_dialog|room_rejoin_warning");
+                }
                 warnings.push(
-                    <strong className="warning" key="non_public_warning">
+                    <span key="non_public_warning">
                         {" " /* Whitespace, otherwise the sentences get smashed together */}
-                        {isSpace
-                            ? _t("leave_room_dialog|space_rejoin_warning")
-                            : _t("leave_room_dialog|room_rejoin_warning")}
-                    </strong>,
+                        {warning}
+                    </span>,
                 );
             }
         }
@@ -1273,10 +1297,10 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                         ? _t("leave_room_dialog|room_leave_admin_warning")
                         : _t("leave_room_dialog|room_leave_mod_warning");
                 warnings.push(
-                    <strong className="warning" key="last_admin_warning">
+                    <span key="last_admin_warning">
                         {" " /* Whitespace, otherwise the sentences get smashed together */}
                         {warning}
-                    </strong>,
+                    </span>,
                 );
             }
         }
@@ -1290,23 +1314,22 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
         const warnings = this.leaveRoomWarnings(roomId);
 
         const isSpace = roomToLeave?.isSpaceRoom();
-        const { finished } = Modal.createDialog(QuestionDialog, {
-            title: isSpace ? _t("space|leave_dialog_action") : _t("action|leave_room"),
-            description: (
-                <span>
-                    {isSpace
-                        ? _t("leave_room_dialog|leave_space_question", {
-                              spaceName: roomToLeave?.name ?? _t("common|unnamed_space"),
-                          })
-                        : _t("leave_room_dialog|leave_room_question", {
-                              roomName: roomToLeave?.name ?? _t("common|unnamed_room"),
-                          })}
-                    {warnings}
-                </span>
-            ),
-            button: _t("action|leave"),
-            danger: warnings.length > 0,
-        });
+        const { finished } = Modal.createDialog(
+            QuestionDialog,
+            {
+                title: isSpace
+                    ? _t("leave_room_dialog|leave_space_title", {
+                          spaceName: roomToLeave?.name ?? _t("common|unnamed_space"),
+                      })
+                    : _t("leave_room_dialog|leave_room_title", {
+                          roomName: roomToLeave?.name ?? _t("common|unnamed_room"),
+                      }),
+                description: warnings.length > 0 ? <span>{warnings}</span> : undefined,
+                button: _t("action|leave"),
+                danger: warnings.length > 0,
+            },
+            "mx_LeaveRoomDialog",
+        );
 
         void finished.then(async ([shouldLeave]) => {
             if (shouldLeave) {
@@ -1346,7 +1369,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
 
     private async copyRoom(roomId: string): Promise<void> {
         const roomLink = makeRoomPermalink(MatrixClientPeg.safeGet(), roomId);
-        const success = await copyPlaintext(roomLink);
+        const success = await copyPlainTextToClipboard(roomLink);
         if (!success) {
             Modal.createDialog(ErrorDialog, {
                 title: _t("error_dialog|copy_room_link_failed|title"),
@@ -1362,7 +1385,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
      */
     private async shouldForceVerification(): Promise<boolean> {
         if (!SdkConfig.get("force_verification")) return false;
-        const mustVerifyFlag = localStorage.getItem("must_verify_device");
+        const mustVerifyFlag = localStorage.getItem("force_verification_on_at_login");
         if (!mustVerifyFlag) return false;
 
         const client = MatrixClientPeg.safeGet();
@@ -1610,6 +1633,8 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
             return this.loggedInView.current.canResetTimelineInRoom(roomId);
         });
 
+        // These listeners live as long as the client: Lifecycle.stopMatrixClient() removes all of them
+        /* oxlint-disable element-web/no-leaked-emitter-listener */
         cli.on(ClientEvent.Sync, (state: SyncState, prevState: SyncState | null, data?: SyncStateData) => {
             if (state === SyncState.Error || state === SyncState.Reconnecting) {
                 this.setState({ syncError: data?.error ?? null });
@@ -1762,6 +1787,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                 });
             }
         });
+        /* oxlint-enable element-web/no-leaked-emitter-listener */
     }
 
     /**
@@ -1772,15 +1798,18 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
     private async onClientStarted(): Promise<void> {
         const cli = MatrixClientPeg.safeGet();
 
-        const shouldForceVerification = await this.shouldForceVerification();
-
         const crypto = cli.getCrypto();
+        // Replace any watcher from a previous client, which would otherwise pile up with each client start
+        if (this.blacklistUnverifiedDevicesWatcherRef) {
+            SettingsStore.unwatchSetting(this.blacklistUnverifiedDevicesWatcherRef);
+            this.blacklistUnverifiedDevicesWatcherRef = undefined;
+        }
         if (crypto) {
             crypto.globalBlacklistUnverifiedDevices = SettingsStore.getValueAt(
                 SettingLevel.DEVICE,
                 "blacklistUnverifiedDevices",
             );
-            SettingsStore.watchSetting(
+            this.blacklistUnverifiedDevicesWatcherRef = SettingsStore.watchSetting(
                 "blacklistUnverifiedDevices",
                 null,
                 (_settingName, _roomId, atLevel, blacklistEnabled) => {
@@ -1791,6 +1820,8 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                 },
             );
         }
+
+        const shouldForceVerification = await this.shouldForceVerification();
 
         // Cannot be done in OnLoggedIn as at that point the AccountSettingsHandler doesn't yet have a client
         // Will be moved to a pre-login flow as well
@@ -2214,13 +2245,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                 return <E2eSetup onCancelled={this.onCompleteSecurityE2eSetupFinished} />;
             case Views.PENDING_CLIENT_START:
                 // we think we are logged in, but are still waiting for the /sync to complete
-                return (
-                    <LoginSplashView
-                        matrixClient={MatrixClientPeg.safeGet()}
-                        onLogoutClick={this.onLogoutClick}
-                        syncError={this.state.syncError}
-                    />
-                );
+                return <LoginSplashView onLogoutClick={this.onLogoutClick} syncError={this.state.syncError} />;
             case Views.LOGGED_IN:
                 // `ready` and `view==LOGGED_IN` may be set before `page_type` (because the
                 // latter is set via the dispatcher). If we don't yet have a `page_type`,
@@ -2242,13 +2267,7 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                     );
                 } else {
                     // we think we are logged in, but are still waiting for the /sync to complete
-                    return (
-                        <LoginSplashView
-                            matrixClient={MatrixClientPeg.safeGet()}
-                            onLogoutClick={this.onLogoutClick}
-                            syncError={this.state.syncError}
-                        />
-                    );
+                    return <LoginSplashView onLogoutClick={this.onLogoutClick} syncError={this.state.syncError} />;
                 }
             case Views.WELCOME:
                 return <Welcome {...this.getServerProperties()} />;
@@ -2304,6 +2323,17 @@ export default class MatrixChat extends React.PureComponent<IProps, IState> {
                 );
             case Views.LOCK_STOLEN:
                 return <SessionLockStolenView />;
+            case Views.LEGACY_CRYPTO_UNSUPPORTED:
+                return (
+                    <LegacyCryptoUnsupportedView
+                        vm={
+                            new LegacyCryptoUnsupportedViewModel({
+                                dispatcher: dis,
+                                brand: SdkConfig.get().brand,
+                            })
+                        }
+                    />
+                );
         }
     }
 
