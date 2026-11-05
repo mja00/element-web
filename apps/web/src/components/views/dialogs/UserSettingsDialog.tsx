@@ -314,7 +314,7 @@ export default function UserSettingsDialog(props: IProps): JSX.Element {
                 UserTab.Help,
                 _td("setting|help_about|title"),
                 <HelpIcon />,
-                <HelpUserSettingsTab />,
+                <HelpUserSettingsTab moduleApi={ModuleApi.instance} />,
                 "UserSettingsHelpAbout",
             ),
         );

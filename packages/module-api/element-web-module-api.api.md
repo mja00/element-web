@@ -269,6 +269,7 @@ originalComponent: (props: P) => JSX.Element) => JSX.Element;
 export interface ExtrasApi {
     addRoomHeaderButtonCallback(cb: RoomHeaderButtonsCallback): void;
     getVisibleRoomBySpaceKey(spaceKey: string, cb: () => string[]): void;
+    setCreditsAttribution(attributionId: string, render: () => JSX.Element): void;
     setSpacePanelItem(spaceKey: string, props: SpacePanelItemProps): void;
 }
 
@@ -473,6 +474,7 @@ export const enum UIComponent {
     ExploreRooms = "UIComponent.exploreRooms",
     FilterContainer = "UIComponent.filterContainer",
     InviteUsers = "UIComponent.sendInvites",
+    PublicRooms = "UIComponent.publicRooms",
     RoomOptionsMenu = "UIComponent.roomOptionsMenu"
 }
 
@@ -488,9 +490,9 @@ export type UrlPreviewHandler = (url: string, mxEvent?: MatrixEvent) => Promise<
 
 // @alpha
 export interface UserCertificate {
-    // (undocumented)
     certificate: CertificateInfo;
     chain: string;
+    chainValidTo: Date;
 }
 
 // @public
@@ -578,6 +580,7 @@ export type X509IpcErrorCode =
 | "MODULE_NOT_LOADED"
 | "KEY_NOT_FOUND"
 | "CERTIFICATE_NOT_FOUND"
+| "CERTIFICATE_INVALID"
 | "PRIVATE_KEY_NOT_FOUND"
 /**
 * `signData` was called before `logIntoKey`, or the session was invalidated since.
